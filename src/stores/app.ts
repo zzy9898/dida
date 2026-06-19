@@ -1,0 +1,328 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import type { UserProfile, Activity, Post, Conversation, CreditLog, ChatMessage, GroupJoinRequest } from '@/data/types'
+import { MOCK_ACTIVITIES, MOCK_CONVERSATIONS, MOCK_POSTS, MOCK_CREDIT_LOGS } from '@/data/mock'
+
+export const useAppStore = defineStore('app', () => {
+  // User state
+  const userProfile = ref<UserProfile | null>(null)
+  const activeTab = ref<string>('home')
+  const prevTab = ref<string>('home')
+
+  // Data lists
+  const activityList = ref<Activity[]>([...MOCK_ACTIVITIES])
+  const postList = ref<Post[]>([...MOCK_POSTS])
+  const conversations = ref<Conversation[]>([...MOCK_CONVERSATIONS])
+  const creditLogs = ref<CreditLog[]>([...MOCK_CREDIT_LOGS])
+
+  // Group join requests
+  const groupJoinRequests = ref<GroupJoinRequest[]>([
+    {
+      id: "req_mock_1",
+      activityId: "act_1",
+      activityTitle: "【中心校区咖啡碰面】周六莫扎咖啡手工冲泡研习交流",
+      requesterId: "user_mock_peer_1",
+      requesterName: "陈思涵 (山大生科)",
+      requesterAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+      ownerId: "user_123",
+      status: "pending"
+    },
+    {
+      id: "req_mock_2",
+      activityId: "act_2",
+      activityTitle: "【洪家楼夜跑约起】操场 5KM 稳配慢跑有氧搭子",
+      requesterId: "user_mock_peer_2",
+      requesterName: "周杰 (山大计算机)",
+      requesterAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
+      ownerId: "user_123",
+      status: "pending"
+    }
+  ])
+
+  // Theme states
+  const registeredThemes = ref<Record<string, boolean>>({})
+  const longtermThemes = ref<Record<string, boolean>>({})
+
+  // Chat state
+  const activeConvId = ref<string | null>(null)
+
+  // ID counter
+  let idCounter = 0
+  const genId = (prefix: string) => `${prefix}${Date.now()}_${idCounter++}`
+
+  // Actions
+  function setUserProfile(profile: UserProfile | null) {
+    userProfile.value = profile
+  }
+
+  function setActiveTab(tab: string) {
+    prevTab.value = activeTab.value
+    activeTab.value = tab
+  }
+
+  function addCreditLog(change: number, reason: string) {
+    if (!userProfile.value) return
+    const newLog: CreditLog = {
+      id: genId('log_'),
+      reason,
+      change,
+      date: new Date().toISOString().split('T')[0]
+    }
+    creditLogs.value = [newLog, ...creditLogs.value]
+    userProfile.value = {
+      ...userProfile.value,
+      creditScore: Math.min(Math.max(userProfile.value.creditScore + change, 0), 120)
+    }
+  }
+
+  function handleJoinActivity(activityId: string) {
+    if (!userProfile.value) return
+    const act = activityList.value.find((a) => a.id === activityId)
+    if (!act) return
+
+    if (act.members.includes(userProfile.value.uid)) {
+      uni.showToast({ title: '你已经在该活动的出游计划中啦！', icon: 'none' })
+      return
+    }
+    if (act.joinedCount >= act.limit) {
+      uni.showToast({ title: '抱歉，该拼团席位已满！', icon: 'none' })
+      return
+    }
+
+    const ownerId = act.creatorUid
+    if (ownerId === userProfile.value.uid) {
+      uni.showToast({ title: '您是该活动的发起人，已经在多人群聊中了噢！', icon: 'none' })
+      return
+    }
+
+    const existingReq = groupJoinRequests.value.find(
+      (r) => r.activityId === activityId && r.requesterId === userProfile.value!.uid
+    )
+    if (existingReq) {
+      if (existingReq.status === 'pending') {
+        uni.showToast({ title: '您的申请已在审核中，请耐心等待！', icon: 'none' })
+      } else if (existingReq.status === 'approved') {
+        uni.showToast({ title: '您的申请已通过！请前往消息板块查看。', icon: 'none' })
+      } else {
+        uni.showToast({ title: '抱歉，对方谢绝了本次申请。', icon: 'none' })
+      }
+      return
+    }
+
+    const newRequest: GroupJoinRequest = {
+      id: genId('req_'),
+      activityId: act.id,
+      activityTitle: act.title,
+      requesterId: userProfile.value.uid,
+      requesterName: userProfile.value.nickname,
+      requesterAvatar: userProfile.value.avatar,
+      ownerId,
+      status: 'pending'
+    }
+    groupJoinRequests.value = [newRequest, ...groupJoinRequests.value]
+    uni.showToast({ title: '申请已提交！请等待群主审批。', icon: 'success' })
+  }
+
+  function handleProcessJoinRequest(requestId: string, approve: boolean) {
+    groupJoinRequests.value = groupJoinRequests.value.map((req) => {
+      if (req.id !== requestId) return req
+      const nextStatus = approve ? 'approved' as const : 'rejected' as const
+
+      if (approve) {
+        activityList.value = activityList.value.map((act) => {
+          if (act.id === req.activityId) {
+            if (act.members.includes(req.requesterId)) return act
+            return {
+              ...act,
+              joinedCount: act.joinedCount + 1,
+              members: [...act.members, req.requesterId]
+            }
+          }
+          return act
+        })
+
+        conversations.value = conversations.value.map((conv) => {
+          if (conv.activityId === req.activityId) {
+            const newMsg: ChatMessage = {
+              id: genId('sys_'),
+              senderId: 'system',
+              senderName: '系统',
+              senderAvatar: '',
+              text: `🎉 "${req.requesterName}"已成功获得校友身份核准加入本拼跑互动群。`,
+              createdAt: '刚刚'
+            }
+            return {
+              ...conv,
+              memberIds: conv.memberIds.includes(req.requesterId)
+                ? conv.memberIds
+                : [...conv.memberIds, req.requesterId],
+              messages: [...conv.messages, newMsg],
+              lastMessage: `🎉 欢迎"${req.requesterName}"加入群聊！`,
+              lastMessageTime: '刚刚'
+            }
+          }
+          return conv
+        })
+      }
+
+      return { ...req, status: nextStatus }
+    })
+
+    if (approve) {
+      uni.showToast({ title: '已批准！对方已自动加入群聊。', icon: 'success' })
+    } else {
+      uni.showToast({ title: '已谢绝该用户的群聊申请。', icon: 'none' })
+    }
+  }
+
+  function handleInitiateChat(peer: { uid: string; name?: string; nickname?: string; avatar: string }) {
+    if (!userProfile.value) return
+    const peerName = peer.nickname || peer.name || 'TA'
+    const existing = conversations.value.find((c) => c.id === peer.uid)
+    if (existing) {
+      activeConvId.value = existing.id
+      activeTab.value = 'chat'
+      return
+    }
+
+    const newConv: Conversation = {
+      id: peer.uid,
+      name: peerName,
+      avatar: peer.avatar,
+      isGroup: false,
+      memberIds: [userProfile.value.uid, peer.uid],
+      lastMessage: '你们已经在滴答配对合规雷达下接通会话。打个招呼破开尴尬吧！',
+      lastMessageTime: '现在',
+      messages: [{
+        id: genId('m_init_'),
+        senderId: 'system',
+        senderName: '系统',
+        senderAvatar: '',
+        text: `[双向合拍匹配] 您与学友「${peerName}」匹配率高达 95%！聊天已接入安全保护。`,
+        createdAt: '现在'
+      }],
+      unreadCount: 0,
+      zeroSugarEnabled: false
+    }
+
+    conversations.value = [newConv, ...conversations.value]
+    activeConvId.value = newConv.id
+    activeTab.value = 'chat'
+  }
+
+  function handleDisconnectConversation(convId: string) {
+    const conv = conversations.value.find((c) => c.id === convId)
+    conversations.value = conversations.value.filter((c) => c.id !== convId)
+    if (conv?.activityId) {
+      groupJoinRequests.value = groupJoinRequests.value.filter((r) => r.activityId !== conv.activityId)
+    }
+    addCreditLog(-2, '开启零糖断联模式销毁本场会话')
+    uni.showToast({ title: '已拦截。对方无法再发送消息。', icon: 'none' })
+  }
+
+  function handleSendMessage(convId: string, text: string) {
+    if (!userProfile.value) return
+    const newMessage: ChatMessage = {
+      id: genId('raw_'),
+      senderId: userProfile.value.uid,
+      senderName: userProfile.value.nickname,
+      senderAvatar: userProfile.value.avatar,
+      text,
+      createdAt: '刚刚'
+    }
+    conversations.value = conversations.value.map((c) => {
+      if (c.id === convId) {
+        return {
+          ...c,
+          lastMessage: text,
+          lastMessageTime: '刚刚',
+          messages: [...c.messages, newMessage]
+        }
+      }
+      return c
+    })
+  }
+
+  function publishActivity(act: Activity) {
+    activityList.value = [act, ...activityList.value]
+    const newConv: Conversation = {
+      id: 'group_' + act.id,
+      name: `【拼团】${act.title.substring(0, 10)}... 群聊`,
+      avatar: act.coverImage,
+      isGroup: true,
+      activityId: act.id,
+      memberIds: [userProfile.value!.uid],
+      lastMessage: '拼游群组会话创建成功！其他同学申请加入后即可自动进群。',
+      lastMessageTime: '现在',
+      messages: [{
+        id: genId('gm_m_'),
+        senderId: 'system',
+        senderName: '系统',
+        senderAvatar: '',
+        text: `[系统群通知] 您已成功发起了本团。伙伴点击申请拼客即可进组交流！`,
+        createdAt: '现在'
+      }],
+      unreadCount: 0,
+      zeroSugarEnabled: false
+    }
+    conversations.value = [newConv, ...conversations.value]
+    addCreditLog(3, `发起了拼团活动："${act.title.substring(0, 10)}..."`)
+  }
+
+  function publishPost(post: Post) {
+    postList.value = [post, ...postList.value]
+    if (!post.isDraft) {
+      addCreditLog(2, `发布图文帖子："${post.title.substring(0, 12)}"`)
+    }
+  }
+
+  function updatePostList(list: Post[]) {
+    postList.value = list
+  }
+
+  function updateActivityList(list: Activity[]) {
+    activityList.value = list
+  }
+
+  function updateProfile(profile: UserProfile) {
+    userProfile.value = profile
+  }
+
+  // Getters
+  const myCreatedActivities = computed(() =>
+    activityList.value.filter((a) => a.creatorUid === userProfile.value?.uid)
+  )
+  const myJoinedActivities = computed(() =>
+    activityList.value.filter((a) =>
+      a.members.includes(userProfile.value?.uid || '') && a.creatorUid !== userProfile.value?.uid
+    )
+  )
+  const myPublishedPosts = computed(() =>
+    postList.value.filter((p) => p.authorName === userProfile.value?.nickname && !p.isDraft)
+  )
+  const myDraftPosts = computed(() =>
+    postList.value.filter((p) => p.authorName === userProfile.value?.nickname && p.isDraft)
+  )
+  const myLikedPosts = computed(() =>
+    postList.value.filter((p) =>
+      p.likedBy?.includes(userProfile.value?.uid || '') ||
+      p.likedBy?.includes(userProfile.value?.nickname || '')
+    )
+  )
+
+  return {
+    userProfile, activeTab, prevTab,
+    activityList, postList, conversations, creditLogs,
+    groupJoinRequests,
+    registeredThemes, longtermThemes,
+    activeConvId, genId,
+    setUserProfile, setActiveTab, addCreditLog,
+    handleJoinActivity, handleProcessJoinRequest,
+    handleInitiateChat, handleDisconnectConversation,
+    handleSendMessage,
+    publishActivity, publishPost,
+    updatePostList, updateActivityList, updateProfile,
+    myCreatedActivities, myJoinedActivities,
+    myPublishedPosts, myDraftPosts, myLikedPosts
+  }
+})

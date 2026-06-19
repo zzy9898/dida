@@ -1,0 +1,771 @@
+<template>
+  <view class="page">
+    <!-- Header -->
+    <view class="header">
+      <view class="back-btn" @tap="handleBack">
+        <text class="back-icon">&#x2190;</text>
+      </view>
+      <text class="header-title">发布帖子</text>
+      <view class="header-placeholder"></view>
+    </view>
+
+    <scroll-view class="form-scroll" scroll-y="true">
+      <!-- Photo Grid -->
+      <view class="section">
+        <text class="section-label">添加图片</text>
+        <view class="photo-grid">
+          <view
+            class="photo-item"
+            v-for="(img, idx) in images"
+            :key="idx"
+          >
+            <image class="photo-img" :src="img" mode="aspectFill" />
+            <view class="photo-remove" @tap="removeImage(idx)">
+              <text class="photo-remove-icon">&#x2715;</text>
+            </view>
+          </view>
+          <view class="photo-add" v-if="images.length < 9" @tap="handlePickImages">
+            <text class="photo-add-icon">+</text>
+            <text class="photo-add-text">添加</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Preset Images -->
+      <view class="section">
+        <text class="section-label">快捷配图</text>
+        <view class="preset-img-row">
+          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=400&q=80')">
+            <image class="preset-thumb" src="https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
+            <text class="preset-thumb-label">操场夕阳</text>
+          </view>
+          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=400&q=80')">
+            <image class="preset-thumb" src="https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
+            <text class="preset-thumb-label">图书馆自修</text>
+          </view>
+          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80')">
+            <image class="preset-thumb" src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
+            <text class="preset-thumb-label">猫咪暖阳</text>
+          </view>
+          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80')">
+            <image class="preset-thumb" src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
+            <text class="preset-thumb-label">美味午餐</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Title -->
+      <view class="section">
+        <text class="section-label">标题</text>
+        <input
+          class="input-field"
+          v-model="form.title"
+          placeholder="给你的帖子起个标题..."
+          :maxlength="16"
+          placeholder-style="color: #c0c4cc;"
+        />
+        <text class="char-count">{{ form.title.length }}/16</text>
+      </view>
+
+      <!-- Category -->
+      <view class="section">
+        <text class="section-label">选择分类</text>
+        <view class="category-grid">
+          <view
+            class="category-btn"
+            :class="{ 'category-btn--active': form.category === cat.value }"
+            v-for="cat in categories"
+            :key="cat.value"
+            @tap="form.category = cat.value"
+          >
+            <text>{{ cat.label }}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Content -->
+      <view class="section">
+        <text class="section-label">正文内容</text>
+        <textarea
+          class="textarea-field"
+          v-model="form.content"
+          placeholder="分享你的校园生活、心情、想法..."
+          placeholder-style="color: #c0c4cc;"
+          :maxlength="2000"
+          auto-height
+        />
+        <text class="char-count">{{ form.content.length }}/2000</text>
+      </view>
+
+      <!-- Voice Recording -->
+      <view class="section">
+        <text class="section-label">语音转文字</text>
+        <view class="voice-btn-wrap">
+          <view
+            class="voice-btn"
+            :class="{ 'voice-btn--recording': isRecording }"
+            @tap="handleVoiceRecord"
+          >
+            <text class="voice-icon">&#x1F3A4;</text>
+            <text>{{ isRecording ? '正在录制...' : '按住录音转文字' }}</text>
+          </view>
+        </view>
+        <view class="recording-wave" v-if="isRecording">
+          <view class="wave-bar" v-for="i in 5" :key="i" :style="{ animationDelay: (i * 0.15) + 's' }"></view>
+        </view>
+      </view>
+
+      <!-- Hashtags -->
+      <view class="section">
+        <text class="section-label">推荐话题</text>
+        <view class="hashtag-row">
+          <view
+            class="hashtag-btn"
+            v-for="tag in hashtags"
+            :key="tag"
+            @tap="appendHashtag(tag)"
+          >
+            <text>{{ tag }}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Location -->
+      <view class="section">
+        <text class="section-label">位置</text>
+        <picker
+          mode="selector"
+          :range="locationOptions"
+          :value="locationIndex"
+          @change="handleLocationChange"
+        >
+          <view class="picker-field">
+            <text :class="{ 'picker-placeholder': !form.location }">
+              {{ form.location || '不显示位置' }}
+            </text>
+            <text class="picker-arrow">&#x25BC;</text>
+          </view>
+        </picker>
+      </view>
+
+      <!-- Visibility -->
+      <view class="section">
+        <text class="section-label">可见范围</text>
+        <view class="visibility-row">
+          <view
+            class="visibility-btn"
+            :class="{ 'visibility-btn--active': form.visibility === opt.value }"
+            v-for="opt in visibilityOptions"
+            :key="opt.value"
+            @tap="form.visibility = opt.value"
+          >
+            <text class="visibility-emoji">{{ opt.icon }}</text>
+            <text class="visibility-label">{{ opt.label }}</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Spacer -->
+      <view class="bottom-spacer"></view>
+    </scroll-view>
+
+    <!-- Bottom Buttons -->
+    <view class="bottom-bar">
+      <view class="btn-draft" @tap="handleSaveDraft">
+        <text>存草稿</text>
+      </view>
+      <view class="btn-publish" @tap="handlePublish">
+        <text>发布笔记</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, computed } from 'vue'
+import { useAppStore } from '@/stores/app'
+import type { Post } from '@/data/types'
+
+const store = useAppStore()
+
+const images = ref<string[]>([])
+const isRecording = ref(false)
+
+interface PublishPostForm {
+  title: string
+  category: string
+  content: string
+  location: string
+  visibility: string
+}
+
+const form = reactive<PublishPostForm>({
+  title: '',
+  category: '暂不分类',
+  content: '',
+  location: '',
+  visibility: 'public'
+})
+
+const categories = [
+  { label: '暂不分类', value: '暂不分类' },
+  { label: '求助吐槽', value: '求助吐槽' },
+  { label: '美味探店', value: '美味探店' },
+  { label: '运动打卡', value: '运动打卡' },
+  { label: '自学研习', value: '自学研习' },
+  { label: '桌游社交', value: '桌游社交' },
+  { label: '摇滚民谣', value: '摇滚民谣' }
+]
+
+const hashtags = ['#跑步打卡', '#操场晚风', '#期末加油', '#自习室', '#猫咖日记', '#食堂干饭', '#校园街拍', '#今日穿搭']
+
+const locationOptions = ['不显示位置', '中心校区图书馆', '风雨操场', '齐园餐厅', '洪家楼教堂', '蒋震图书馆']
+const locationIndex = computed(() => {
+  const idx = locationOptions.indexOf(form.location)
+  return idx >= 0 ? idx : 0
+})
+
+const visibilityOptions = [
+  { label: '公开', value: 'public', icon: '&#x1F30D;' },
+  { label: '仅校友', value: 'school', icon: '&#x1F393;' },
+  { label: '私密', value: 'private', icon: '&#x1F512;' }
+]
+
+function handleBack() {
+  uni.navigateBack()
+}
+
+function handlePickImages() {
+  const remaining = 9 - images.value.length
+  uni.chooseImage({
+    count: remaining,
+    sizeType: ['compressed'],
+    sourceType: ['album', 'camera'],
+    success: (res) => {
+      images.value = [...images.value, ...res.tempFilePaths]
+    },
+    fail: () => {
+      uni.showToast({ title: '取消选择', icon: 'none' })
+    }
+  })
+}
+
+function removeImage(idx: number) {
+  images.value = images.value.filter((_, i) => i !== idx)
+}
+
+function addPresetImage(url: string) {
+  if (images.value.length >= 9) {
+    uni.showToast({ title: '最多添加9张图片', icon: 'none' })
+    return
+  }
+  if (images.value.includes(url)) {
+    uni.showToast({ title: '该图片已添加', icon: 'none' })
+    return
+  }
+  images.value = [...images.value, url]
+}
+
+function handleLocationChange(e: any) {
+  const idx = Number(e.detail.value)
+  if (idx === 0) {
+    form.location = ''
+  } else {
+    form.location = locationOptions[idx]
+  }
+}
+
+function appendHashtag(tag: string) {
+  if (form.content.includes(tag)) return
+  form.content = form.content ? form.content + ' ' + tag : tag
+}
+
+function handleVoiceRecord() {
+  if (isRecording.value) return
+  isRecording.value = true
+
+  setTimeout(() => {
+    isRecording.value = false
+    const voiceText = '【语音转文字】今天天气真好，适合出去走走，有没有一起的小伙伴呀？'
+    form.content = form.content ? form.content + '\n' + voiceText : voiceText
+    uni.showToast({ title: '语音识别完成', icon: 'success' })
+  }, 2500)
+}
+
+function validateForm(): string | null {
+  if (!form.title.trim()) return '请填写帖子标题'
+  if (!form.content.trim()) return '请填写正文内容'
+  if (images.value.length === 0) return '请至少添加一张图片'
+  return null
+}
+
+function buildPost(isDraft: boolean): Post | null {
+  if (!store.userProfile) {
+    uni.showToast({ title: '请先登录', icon: 'none' })
+    return null
+  }
+
+  const category = form.category === '暂不分类' ? undefined : form.category
+
+  return {
+    id: store.genId('post_'),
+    title: form.title.trim(),
+    content: form.content.trim(),
+    images: [...images.value],
+    school: store.userProfile.school,
+    authorName: store.userProfile.nickname,
+    authorAvatar: store.userProfile.avatar,
+    authorVerified: true,
+    likes: 0,
+    likedBy: [],
+    comments: [],
+    createdAt: isDraft ? '草稿' : new Date().toLocaleString('zh-CN'),
+    category,
+    isDraft
+  }
+}
+
+function handleSaveDraft() {
+  if (!form.title.trim() && !form.content.trim()) {
+    uni.showToast({ title: '空内容无法保存', icon: 'none' })
+    return
+  }
+
+  const post = buildPost(true)
+  if (!post) return
+
+  store.publishPost(post)
+  uni.showToast({ title: '已保存草稿', icon: 'success' })
+  setTimeout(() => {
+    uni.switchTab({ url: '/pages/profile/profile' })
+  }, 800)
+}
+
+function handlePublish() {
+  const error = validateForm()
+  if (error) {
+    uni.showToast({ title: error, icon: 'none' })
+    return
+  }
+
+  const post = buildPost(false)
+  if (!post) return
+
+  store.publishPost(post)
+  uni.showToast({ title: '发布成功！', icon: 'success' })
+  setTimeout(() => {
+    uni.switchTab({ url: '/pages/forum/forum' })
+  }, 800)
+}
+</script>
+
+<style lang="scss" scoped>
+$blue: #2563eb;
+$bg: #f8f9fa;
+$border: #e5e7eb;
+$text: #333333;
+$text-secondary: #666666;
+$text-placeholder: #c0c4cc;
+$red: #ef4444;
+
+.page {
+  min-height: 100vh;
+  background-color: $bg;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 32rpx;
+  background-color: #ffffff;
+  border-bottom: 1rpx solid $border;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.back-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.back-icon {
+  font-size: 40rpx;
+  color: $text;
+  font-weight: 700;
+}
+
+.header-title {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: $text;
+}
+
+.header-placeholder {
+  width: 64rpx;
+}
+
+.form-scroll {
+  flex: 1;
+  padding: 24rpx 32rpx;
+}
+
+.section {
+  margin-bottom: 32rpx;
+}
+
+.section-label {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: $text;
+  margin-bottom: 16rpx;
+  display: block;
+}
+
+/* Photo Grid */
+.photo-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.photo-item {
+  width: calc((100% - 36rpx) / 4);
+  height: 0;
+  padding-bottom: calc((100% - 36rpx) / 4);
+  position: relative;
+  border-radius: 12rpx;
+  overflow: hidden;
+}
+
+.photo-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.photo-remove {
+  position: absolute;
+  top: 6rpx;
+  right: 6rpx;
+  width: 40rpx;
+  height: 40rpx;
+  background-color: rgba(0, 0, 0, 0.55);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-remove-icon {
+  font-size: 24rpx;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.photo-add {
+  width: calc((100% - 36rpx) / 4);
+  height: 0;
+  padding-bottom: calc((100% - 36rpx) / 4);
+  position: relative;
+  background-color: #ffffff;
+  border: 2rpx dashed $border;
+  border-radius: 12rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.photo-add-icon {
+  font-size: 48rpx;
+  color: $text-placeholder;
+  line-height: 1;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -65%);
+}
+
+.photo-add-text {
+  font-size: 20rpx;
+  color: $text-placeholder;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 10rpx);
+}
+
+/* Preset Images */
+.preset-img-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.preset-img-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.preset-thumb {
+  width: 100%;
+  height: 140rpx;
+  border-radius: 12rpx;
+}
+
+.preset-thumb-label {
+  font-size: 20rpx;
+  color: $text-secondary;
+  text-align: center;
+}
+
+/* Input */
+.input-field {
+  width: 100%;
+  height: 80rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 12rpx;
+  padding: 0 24rpx;
+  font-size: 28rpx;
+  color: $text;
+  box-sizing: border-box;
+}
+
+.char-count {
+  font-size: 22rpx;
+  color: $text-placeholder;
+  text-align: right;
+  display: block;
+  margin-top: 8rpx;
+}
+
+/* Category Grid */
+.category-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.category-btn {
+  padding: 14rpx 28rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 32rpx;
+  font-size: 26rpx;
+  color: $text-secondary;
+
+  &--active {
+    background-color: #eff6ff;
+    border-color: $blue;
+    color: $blue;
+    font-weight: 600;
+  }
+}
+
+/* Textarea */
+.textarea-field {
+  width: 100%;
+  min-height: 240rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 12rpx;
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  color: $text;
+  box-sizing: border-box;
+}
+
+/* Voice */
+.voice-btn-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.voice-btn {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 20rpx 48rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 48rpx;
+  font-size: 28rpx;
+  color: $text-secondary;
+
+  &--recording {
+    background-color: #fef2f2;
+    border-color: $red;
+    color: $red;
+    animation: pulse 0.8s ease-in-out infinite;
+  }
+}
+
+.voice-icon {
+  font-size: 36rpx;
+}
+
+.recording-wave {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8rpx;
+  height: 60rpx;
+  margin-top: 16rpx;
+}
+
+.wave-bar {
+  width: 8rpx;
+  height: 20rpx;
+  background-color: $red;
+  border-radius: 4rpx;
+  animation: waveAnim 0.6s ease-in-out infinite alternate;
+
+  &:nth-child(2) { height: 36rpx; }
+  &:nth-child(3) { height: 52rpx; }
+  &:nth-child(4) { height: 36rpx; }
+  &:nth-child(5) { height: 20rpx; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.03); }
+}
+
+@keyframes waveAnim {
+  0% { height: 20%; }
+  100% { height: 100%; }
+}
+
+/* Hashtags */
+.hashtag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.hashtag-btn {
+  padding: 10rpx 24rpx;
+  background-color: #eff6ff;
+  border-radius: 24rpx;
+  font-size: 24rpx;
+  color: $blue;
+}
+
+/* Picker */
+.picker-field {
+  width: 100%;
+  height: 80rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 12rpx;
+  padding: 0 24rpx;
+  font-size: 28rpx;
+  color: $text;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.picker-placeholder {
+  color: $text-placeholder;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+  color: $text-placeholder;
+}
+
+/* Visibility */
+.visibility-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.visibility-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24rpx 16rpx;
+  background-color: #ffffff;
+  border: 2rpx solid $border;
+  border-radius: 16rpx;
+  gap: 8rpx;
+
+  &--active {
+    border-color: $blue;
+    background-color: #eff6ff;
+  }
+}
+
+.visibility-emoji {
+  font-size: 36rpx;
+}
+
+.visibility-label {
+  font-size: 24rpx;
+  color: $text-secondary;
+}
+
+/* Spacer */
+.bottom-spacer {
+  height: 140rpx;
+}
+
+/* Bottom Bar */
+.bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding: 20rpx 32rpx;
+  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
+  background-color: #ffffff;
+  border-top: 1rpx solid $border;
+  gap: 24rpx;
+  z-index: 10;
+}
+
+.btn-draft {
+  flex: 1;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: $bg;
+  border: 2rpx solid $border;
+  border-radius: 44rpx;
+  font-size: 30rpx;
+  color: $text-secondary;
+}
+
+.btn-publish {
+  flex: 2;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: $blue;
+  border-radius: 44rpx;
+  font-size: 30rpx;
+  color: #ffffff;
+  font-weight: 600;
+}
+</style>
