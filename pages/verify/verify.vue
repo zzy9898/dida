@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, getCurrentInstance, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { MOCK_SCHOOLS, QUESTIONNAIRE_QUESTIONS } from '@/data/mock'
-import type { UserProfile, GenderType } from '@/data/types'
+import type { GenderType, RegisterParam } from '@/data/types'
+import * as userApi from '@/api/user'
+import { CAPTCHA_ID } from '@/config'
+// #ifndef MP-WEIXIN
+import { getCaptchaResult } from '@/utils/captcha'
+// #endif
+// #ifdef MP-WEIXIN
+import { beginMpCaptcha, settleMpCaptcha } from '@/utils/captcha'
+// #endif
 
 const store = useAppStore()
 
@@ -13,6 +21,17 @@ const currentStep = ref<number>(0) // 0:login 1:verify 2:questionnaire 3:profile
 const authMode = ref<'login' | 'register'>('login')
 const loginMethod = ref<'phone' | 'wechat'>('phone')
 const phoneOrWechatInput = ref('')
+// 登录方式（仅 login + phone 下）：密码 / 短信验证码
+const loginType = ref<'password' | 'sms'>('password')
+const loginPassword = ref('')
+const loginSmsCode = ref('')
+const loginSmsCountdown = ref(0)
+const submitting = ref(false)
+// 微信小程序 captcha4 组件显隐
+const mpCaptchaVisible = ref(false)
+// 注册补充字段（后端必填）
+const realName = ref('')
+const regPassword = ref('')
 
 // ==================== Stage 1: Verify state ====================
 const selectedSchool = ref(MOCK_SCHOOLS[0])
@@ -64,10 +83,12 @@ const maleAvatars = [
 // ==================== Timer references ====================
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 let smsTimer: ReturnType<typeof setInterval> | null = null
+let loginSmsTimer: ReturnType<typeof setInterval> | null = null
 
 onUnmounted(() => {
   if (countdownTimer) clearInterval(countdownTimer)
   if (smsTimer) clearInterval(smsTimer)
+  if (loginSmsTimer) clearInterval(loginSmsTimer)
 })
 
 // ==================== Helper: navigate to home ====================
@@ -76,63 +97,142 @@ function goHome() {
 }
 
 // ==================== Stage 0: Login methods ====================
-function handleWechatExistingLogin() {
-  const profile: UserProfile = {
-    uid: 'user_dida_existing_wc',
-    nickname: '山大羽球小王子',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
-    gender: 'MALE',
-    age: 21,
-    school: '山东大学',
-    email: 'xiaowangzi@sdu.edu.cn',
-    interests: ['🏸 羽毛球局', '📷 复古摄影', '☕ 咖啡探店'],
-    personalityTags: ['🎨 浪漫感性艺术派', '🧐 逻辑缜密技术控'],
-    activityPrefs: ['温和守信', 'AA分摊'],
-    phone: '13988886666',
-    wechat: 'dida_wangzi_sdu',
-    emergencyContactName: '张老师(辅导员)',
-    emergencyContactPhone: '13800138000',
-    creditScore: 115
-  }
-  store.setUserProfile(profile)
-  uni.showToast({ title: '欢迎回来，已认证用户"山大羽球小王子"！', icon: 'none', duration: 2000 })
-  goHome()
+// 微信登录暂未开放（后端无对应接口）
+function handleWechatDisabled() {
+  uni.showToast({ title: '微信登录敬请期待，请使用手机号', icon: 'none' })
 }
 
-function handlePhoneExistingLogin() {
-  if (phoneOrWechatInput.value.length !== 11) {
+function isValidPhone(p: string) {
+  return /^1\d{10}$/.test(p)
+}
+
+// 账号密码登录
+async function handlePasswordLogin() {
+  if (!isValidPhone(phoneOrWechatInput.value)) {
     uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
     return
   }
-  const profile: UserProfile = {
-    uid: 'user_dida_existing_ph',
-    nickname: '山大漫步女孩',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-    gender: 'FEMALE',
-    age: 20,
-    school: '山东大学',
-    email: 'girl_dida@sdu.edu.cn',
-    interests: ['☕ 咖啡探店', '📷 复古摄影', '🎮 桌游密逃'],
-    personalityTags: ['🦄 古灵精怪脑洞手', '🔥 阳光社牛活力狂'],
-    activityPrefs: ['温和守信', '拼游即合'],
-    phone: phoneOrWechatInput.value,
-    wechat: 'girl_walk_sdu',
-    emergencyContactName: '刘辅导员',
-    emergencyContactPhone: '13911112222',
-    creditScore: 110
+  if (!loginPassword.value.trim()) {
+    uni.showToast({ title: '请输入登录密码', icon: 'none' })
+    return
   }
-  store.setUserProfile(profile)
-  uni.showToast({ title: '欢迎回来，用户"山大漫步女孩"！正在进入系统...', icon: 'none', duration: 2000 })
-  goHome()
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    await store.loginWithPassword(phoneOrWechatInput.value, loginPassword.value)
+    uni.showToast({ title: '登录成功', icon: 'success' })
+    goHome()
+  } catch {
+    // 错误信息已由 request 层 toast
+  } finally {
+    submitting.value = false
+  }
 }
 
-function handleWechatRegister() {
-  wechat.value = 'Wechat_Reg_' + Math.floor(Math.random() * 900 + 100)
-  currentStep.value = 1
+// 图形验证码统一入口：H5 走 ct4.js；微信小程序走原生 captcha4 组件；其它端降级
+async function requestCaptcha() {
+  // #ifdef MP-WEIXIN
+  if (!CAPTCHA_ID) {
+    uni.showToast({ title: '未配置图形验证码', icon: 'none' })
+    throw new Error('NO_CAPTCHA_ID')
+  }
+  const p = beginMpCaptcha()
+  mpCaptchaVisible.value = true
+  await nextTick()
+  triggerMpShowCaptcha()
+  return await p
+  // #endif
+  // #ifndef MP-WEIXIN
+  return await getCaptchaResult()
+  // #endif
+}
+
+// #ifdef MP-WEIXIN
+function triggerMpShowCaptcha() {
+  const inst = getCurrentInstance()
+  const comp = (inst?.proxy as any)?.selectComponent?.('#aliCaptcha')
+  if (comp && typeof comp.showCaptcha === 'function') comp.showCaptcha()
+}
+function onCaptchaReady() {
+  // 组件就绪后兜底弹出
+  triggerMpShowCaptcha()
+}
+function onCaptchaSuccess(e: any) {
+  settleMpCaptcha(true, e?.detail)
+  mpCaptchaVisible.value = false
+}
+function onCaptchaError(e: any) {
+  settleMpCaptcha(false, e?.detail)
+  mpCaptchaVisible.value = false
+}
+function onCaptchaClose() {
+  settleMpCaptcha(false)
+  mpCaptchaVisible.value = false
+}
+// #endif
+
+// 发送短信验证码（先过阿里云图形验证码）
+async function handleSendLoginSms() {
+  if (loginSmsCountdown.value > 0) return
+  if (!isValidPhone(phoneOrWechatInput.value)) {
+    uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
+    return
+  }
+  try {
+    const captcha = await requestCaptcha()
+    await userApi.getSmsCode({ ...captcha, phone_number: phoneOrWechatInput.value })
+    uni.showToast({ title: '验证码已发送', icon: 'success' })
+    startLoginSmsCountdown()
+  } catch {
+    // 用户取消图形验证 / 平台不支持 / 下发失败：相关提示已在各自处理
+  }
+}
+
+function startLoginSmsCountdown() {
+  loginSmsCountdown.value = 60
+  if (loginSmsTimer) clearInterval(loginSmsTimer)
+  loginSmsTimer = setInterval(() => {
+    if (loginSmsCountdown.value <= 1) {
+      if (loginSmsTimer) clearInterval(loginSmsTimer)
+      loginSmsCountdown.value = 0
+      return
+    }
+    loginSmsCountdown.value--
+  }, 1000)
+}
+
+// 短信验证码登录
+async function handleSmsLogin() {
+  if (!isValidPhone(phoneOrWechatInput.value)) {
+    uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
+    return
+  }
+  if (!loginSmsCode.value.trim()) {
+    uni.showToast({ title: '请输入短信验证码', icon: 'none' })
+    return
+  }
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const ok = await store.loginWithSms(phoneOrWechatInput.value, loginSmsCode.value)
+    if (ok) {
+      uni.showToast({ title: '登录成功', icon: 'success' })
+      goHome()
+    } else {
+      // 未注册，引导去注册流程
+      uni.showToast({ title: '该手机号未注册，请先完成注册', icon: 'none', duration: 2000 })
+      phone.value = phoneOrWechatInput.value
+      authMode.value = 'register'
+    }
+  } catch {
+    // 错误信息已由 request 层 toast
+  } finally {
+    submitting.value = false
+  }
 }
 
 function handlePhoneRegister() {
-  if (phoneOrWechatInput.value.length !== 11) {
+  if (!isValidPhone(phoneOrWechatInput.value)) {
     uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
     return
   }
@@ -250,68 +350,58 @@ function handleFinishQuestionnaire() {
 }
 
 // ==================== Stage 3: Profile methods ====================
-function buildProfile(uid: string): UserProfile {
-  const avatarSet = gender.value === 'MALE' ? maleAvatars : femaleAvatars
-  const finalAvatar = avatarSet[selectedAvatarIdx.value] || avatarSet[0]
-
-  return {
-    uid,
-    nickname,
-    avatar: finalAvatar,
-    gender: gender.value,
-    age: Number(age.value),
-    school: selectedSchool.value.name,
-    email: `${emailPrefix.value || 'dida'}@${selectedSchool.value.domain}`,
-    interests: answers.value.interests,
-    personalityTags: answers.value.personality,
-    activityPrefs: answers.value.activity_prefs,
-    phone: phone.value || '13800000000',
-    wechat: wechat.value || 'dida_vip',
-    emergencyContactName: emergencyName.value,
-    emergencyContactPhone: emergencyPhone.value,
-    creditScore: 100
-  }
-}
-
-function handleFormSubmit() {
+// 提交注册：组装 RegisterParam 调后端注册（成功后即登录 + IM 登录）
+async function submitRegister() {
   if (!nickname.value.trim()) {
     uni.showToast({ title: '请输入你的专属昵称！', icon: 'none' })
     return
   }
+  if (!realName.value.trim()) {
+    uni.showToast({ title: '请输入真实姓名', icon: 'none' })
+    return
+  }
+  if (regPassword.value.trim().length < 6) {
+    uni.showToast({ title: '登录密码至少 6 位', icon: 'none' })
+    return
+  }
+  if (!phone.value) {
+    uni.showToast({ title: '注册手机号缺失，请返回首页重新开始', icon: 'none' })
+    return
+  }
+  if (submitting.value) return
+  submitting.value = true
 
-  const profile = buildProfile('user_123')
-  store.setUserProfile(profile)
-  uni.showToast({ title: '认证完成，欢迎加入滴答！', icon: 'success', duration: 2000 })
-  setTimeout(() => {
-    goHome()
-  }, 800)
+  const avatarSet = gender.value === 'MALE' ? maleAvatars : femaleAvatars
+  const finalAvatar = avatarSet[selectedAvatarIdx.value] || avatarSet[0]
+  const param: RegisterParam = {
+    phone: phone.value,
+    password: regPassword.value,
+    nickname: nickname.value.trim(),
+    name: realName.value.trim(),
+    gender: gender.value === 'OTHER' ? 'UNKNOWN' : gender.value,
+    interestTags: answers.value.interests,
+    imageUrl: finalAvatar,
+  }
+
+  try {
+    await store.registerUser(param)
+    uni.showToast({ title: '注册完成，欢迎加入滴答！', icon: 'success', duration: 1500 })
+    setTimeout(() => goHome(), 800)
+  } catch {
+    // 错误信息已由 request 层 toast（如字段校验失败 code:404）
+  } finally {
+    submitting.value = false
+  }
 }
 
+function handleFormSubmit() {
+  submitRegister()
+}
+
+// 跳过紧急联系人填写（姓名/密码/昵称为后端必填，仍需完成）
 function handleSkip() {
   showSkipModal.value = false
-  const avatarSet = gender.value === 'MALE' ? maleAvatars : femaleAvatars
-  const finalAvatar = avatarSet[0]
-
-  const profile: UserProfile = {
-    uid: 'user_123_skipped',
-    nickname: nickname.value.trim() || '微信同校校友',
-    avatar: finalAvatar,
-    gender: gender.value,
-    age: Number(age.value) || 20,
-    school: selectedSchool.value.name,
-    email: `${emailPrefix.value || 'dida'}@${selectedSchool.value.domain}`,
-    interests: answers.value.interests,
-    personalityTags: answers.value.personality,
-    activityPrefs: answers.value.activity_prefs,
-    phone: phone.value || '13800000000',
-    wechat: wechat.value || 'dida_vip',
-    emergencyContactName: emergencyName.value || '未设置',
-    emergencyContactPhone: emergencyPhone.value || '未设置',
-    creditScore: 100
-  }
-  store.setUserProfile(profile)
-  uni.showToast({ title: '已跳过名片完善，可随时在"我的"中补充。', icon: 'none', duration: 2000 })
-  goHome()
+  submitRegister()
 }
 
 // ==================== Stage indicator helpers ====================
@@ -370,15 +460,15 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
 
           <!-- Login mode content -->
           <template v-if="authMode === 'login'">
-            <!-- WeChat login (existing user) -->
+            <!-- WeChat login (disabled, 后端暂无接口) -->
             <view v-if="loginMethod === 'wechat'" class="login-card wechat-card">
               <view class="card-icon-wrap wechat-icon-bg">
                 <text class="card-icon-emoji">&#10003;</text>
               </view>
-              <text class="card-title">授权微信极速登录</text>
-              <text class="card-desc">检测到您已完成学籍认证，微信登录直接直达主页</text>
-              <view class="card-btn wechat-btn" @tap="handleWechatExistingLogin">
-                <text>授权微信，直接登录主页面</text>
+              <text class="card-title">微信登录敬请期待</text>
+              <text class="card-desc">当前暂未开放微信登录，请使用手机号登录</text>
+              <view class="card-btn disabled-btn" @tap="handleWechatDisabled">
+                <text>暂未开放</text>
               </view>
             </view>
 
@@ -394,26 +484,79 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
                   class="phone-input"
                 />
               </view>
-              <view class="info-tip">
-                <text>提示：对于已注册用户，输入11位手机号一键获取验证码可直接进入主页！</text>
+
+              <!-- 登录方式：密码 / 短信验证码 -->
+              <view class="toggle-row">
+                <view
+                  class="toggle-btn"
+                  :class="{ active: loginType === 'password' }"
+                  @tap="loginType = 'password'"
+                >
+                  <text>密码登录</text>
+                </view>
+                <view
+                  class="toggle-btn"
+                  :class="{ active: loginType === 'sms' }"
+                  @tap="loginType = 'sms'"
+                >
+                  <text>短信验证码</text>
+                </view>
               </view>
-              <view class="card-btn primary-btn" @tap="handlePhoneExistingLogin">
-                <text>一键快捷登录（直达主页）</text>
-              </view>
+
+              <!-- 密码登录 -->
+              <template v-if="loginType === 'password'">
+                <view class="input-card">
+                  <text class="input-label">登录密码</text>
+                  <input
+                    type="password"
+                    v-model="loginPassword"
+                    placeholder="请输入登录密码"
+                    class="input-field"
+                  />
+                </view>
+                <view class="card-btn primary-btn" @tap="handlePasswordLogin">
+                  <text>{{ submitting ? '登录中...' : '登录' }}</text>
+                </view>
+              </template>
+
+              <!-- 短信验证码登录 -->
+              <template v-else>
+                <view class="sms-row">
+                  <view class="input-card sms-input-card">
+                    <text class="input-label">短信验证码（6位）</text>
+                    <input
+                      type="number"
+                      v-model="loginSmsCode"
+                      placeholder="请输入 6 位短信验证码"
+                      maxlength="6"
+                      class="input-field"
+                    />
+                  </view>
+                  <view class="sms-btn" :class="{ disabled: loginSmsCountdown > 0 }" @tap="handleSendLoginSms">
+                    <text>{{ loginSmsCountdown > 0 ? loginSmsCountdown + 's' : '获取验证码' }}</text>
+                  </view>
+                </view>
+                <view class="info-tip">
+                  <text>提示：获取验证码需完成图形验证（仅 H5 支持）。未注册手机号将引导去注册。</text>
+                </view>
+                <view class="card-btn primary-btn" @tap="handleSmsLogin">
+                  <text>{{ submitting ? '登录中...' : '登录' }}</text>
+                </view>
+              </template>
             </view>
           </template>
 
           <!-- Register mode content -->
           <template v-else>
-            <!-- WeChat register -->
+            <!-- WeChat register (disabled, 后端暂无接口) -->
             <view v-if="loginMethod === 'wechat'" class="login-card register-card">
               <view class="card-icon-wrap register-icon-bg">
                 <text class="card-icon-emoji">&#9786;</text>
               </view>
-              <text class="card-title">首次入驻！安全微信注册</text>
-              <text class="card-desc">注册需通过：学籍校验 - 偏好问卷 - 真实名片 3个流程</text>
-              <view class="card-btn primary-btn" @tap="handleWechatRegister">
-                <text>授权微信注册，前往学籍校验</text>
+              <text class="card-title">微信注册敬请期待</text>
+              <text class="card-desc">当前暂未开放微信注册，请使用手机号注册</text>
+              <view class="card-btn disabled-btn" @tap="handleWechatDisabled">
+                <text>暂未开放</text>
               </view>
             </view>
 
@@ -636,6 +779,26 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
                 />
               </view>
 
+              <view class="input-card">
+                <text class="input-label">真实姓名</text>
+                <input
+                  type="text"
+                  v-model="realName"
+                  placeholder="请输入真实姓名（用于实名认证）"
+                  class="input-field"
+                />
+              </view>
+
+              <view class="input-card">
+                <text class="input-label">登录密码</text>
+                <input
+                  type="password"
+                  v-model="regPassword"
+                  placeholder="设置登录密码（至少 6 位）"
+                  class="input-field"
+                />
+              </view>
+
               <!-- Age + Gender row -->
               <view class="age-gender-row">
                 <view class="input-card half-card">
@@ -734,6 +897,20 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
         </view>
       </view>
     </scroll-view>
+
+    <!-- ==================== 微信小程序图形验证码（原生 captcha4 组件） ==================== -->
+    <!-- #ifdef MP-WEIXIN -->
+    <captcha4
+      id="aliCaptcha"
+      v-if="mpCaptchaVisible"
+      :captchaId="CAPTCHA_ID"
+      @ready="onCaptchaReady"
+      @success="onCaptchaSuccess"
+      @error="onCaptchaError"
+      @close="onCaptchaClose"
+      @fail="onCaptchaError"
+    />
+    <!-- #endif -->
 
     <!-- ==================== SKIP MODAL ==================== -->
     <view v-if="showSkipModal" class="modal-overlay" @tap="showSkipModal = false">
@@ -988,6 +1165,11 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
 
 .wechat-btn {
   background: #10b981;
+}
+
+.disabled-btn {
+  background: #d4d4d4;
+  color: #fff;
 }
 
 .primary-btn {

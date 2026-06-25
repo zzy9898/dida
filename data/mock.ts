@@ -363,7 +363,7 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
 ]
 
 export const MOCK_CREDIT_LOGS: CreditLog[] = [
-  { id: "log_1", reason: "成功守约完成"周末咖啡探店活动"", change: 5, date: "2026-06-04" },
+  { id: "log_1", reason: "成功守约完成「周末咖啡探店活动」", change: 5, date: "2026-06-04" },
   { id: "log_2", reason: "完成真实的高校在校生学籍认证", change: 10, date: "2026-06-02" },
   { id: "log_3", reason: "发布积极活泼的活动拼贴未发生任何纠纷", change: 3, date: "2026-05-30" },
   { id: "log_4", reason: "被对方匿名好评：极具学者风度和幽默感", change: 5, date: "2026-05-28" }

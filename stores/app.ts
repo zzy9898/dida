@@ -1,7 +1,40 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { UserProfile, Activity, Post, Conversation, CreditLog, ChatMessage, GroupJoinRequest } from '@/data/types'
+import type {
+  UserProfile, Activity, Post, Conversation, CreditLog, ChatMessage, GroupJoinRequest,
+  UserLoginVO, UserInfoVO, RegisterParam, GenderType,
+} from '@/data/types'
 import { MOCK_ACTIVITIES, MOCK_CONVERSATIONS, MOCK_POSTS, MOCK_CREDIT_LOGS } from '@/data/mock'
+import * as userApi from '@/api/user'
+import { imLogin, imLogout } from '@/utils/im'
+import { clearAuthStorage } from '@/utils/request'
+import { STORAGE_KEYS } from '@/config'
+
+/** 后端 Gender(UNKNOWN) → 前端 GenderType(OTHER) */
+function normalizeGender(g: GenderType): GenderType {
+  return g === 'UNKNOWN' ? 'OTHER' : g
+}
+
+/** 后端用户 VO → 前端 UserProfile（后端缺失的字段给合理默认值） */
+function mapVoToProfile(vo: UserLoginVO | UserInfoVO): UserProfile {
+  return {
+    uid: vo.id,
+    nickname: vo.nickname,
+    avatar: vo.imageUrl || '',
+    gender: normalizeGender(vo.gender),
+    age: 20,
+    school: '',
+    email: '',
+    interests: vo.interestTags || [],
+    personalityTags: [],
+    activityPrefs: [],
+    phone: vo.phone,
+    wechat: '',
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    creditScore: typeof vo.reputationScore === 'number' ? vo.reputationScore : 100,
+  }
+}
 
 export const useAppStore = defineStore('app', () => {
   // User state
@@ -46,6 +79,11 @@ export const useAppStore = defineStore('app', () => {
   // Chat state
   const activeConvId = ref<string | null>(null)
 
+  // Auth state（后端鉴权 + IM）
+  const satoken = ref<string>('')
+  const imUserId = ref<string>('')
+  const userSig = ref<string>('')
+
   // ID counter
   let idCounter = 0
   const genId = (prefix: string) => `${prefix}${Date.now()}_${idCounter++}`
@@ -53,6 +91,84 @@ export const useAppStore = defineStore('app', () => {
   // Actions
   function setUserProfile(profile: UserProfile | null) {
     userProfile.value = profile
+  }
+
+  // ==================== 认证（后端 + IM） ====================
+
+  /** 登录/注册成功后：持久化令牌、应用 profile、登录 IM */
+  async function applySession(vo: UserLoginVO) {
+    satoken.value = vo.tokenInfo?.tokenValue || ''
+    imUserId.value = vo.id
+    userSig.value = vo.userSig || ''
+
+    uni.setStorageSync(STORAGE_KEYS.TOKEN, satoken.value)
+    uni.setStorageSync(STORAGE_KEYS.TOKEN_NAME, vo.tokenInfo?.tokenName || 'satoken')
+    uni.setStorageSync(STORAGE_KEYS.USER_ID, vo.id)
+    uni.setStorageSync(STORAGE_KEYS.USER_SIG, userSig.value)
+
+    const profile = mapVoToProfile(vo)
+    setUserProfile(profile)
+    uni.setStorageSync(STORAGE_KEYS.PROFILE, profile)
+
+    await imLogin(vo.id, vo.userSig)
+  }
+
+  /** 账号密码登录 */
+  async function loginWithPassword(phone: string, password: string) {
+    const vo = await userApi.login(phone, password)
+    await applySession(vo)
+  }
+
+  /**
+   * 手机号 + 短信验证码登录。
+   * @returns true 已登录；false 该手机号未注册（前端引导去注册）
+   */
+  async function loginWithSms(phoneNumber: string, code: string): Promise<boolean> {
+    const vo = await userApi.loginSms(phoneNumber, code)
+    if (!vo) return false
+    await applySession(vo)
+    return true
+  }
+
+  /** 注册（成功后即登录态 + IM 登录） */
+  async function registerUser(param: RegisterParam) {
+    const vo = await userApi.register(param)
+    await applySession(vo)
+  }
+
+  /** 退出登录：后端登出 + IM 登出 + 清本地态 */
+  async function logout() {
+    const uid = imUserId.value || uni.getStorageSync(STORAGE_KEYS.USER_ID)
+    if (uid) {
+      try { await userApi.logout(uid) } catch { /* 忽略登出失败 */ }
+    }
+    await imLogout()
+    clearAuthStorage()
+    satoken.value = ''
+    imUserId.value = ''
+    userSig.value = ''
+    setUserProfile(null)
+  }
+
+  /**
+   * 启动时恢复登录态：校验 token 有效性 + 重新登录 IM。
+   * @returns 是否成功恢复
+   */
+  async function restoreSession(): Promise<boolean> {
+    const token = uni.getStorageSync(STORAGE_KEYS.TOKEN)
+    if (!token) return false
+    try {
+      const info = await userApi.getUserInfo() // 401 会在 request 层清态并跳转
+      satoken.value = token
+      imUserId.value = info.id
+      userSig.value = uni.getStorageSync(STORAGE_KEYS.USER_SIG) || ''
+      setUserProfile(mapVoToProfile(info))
+      await imLogin(info.id, userSig.value)
+      return true
+    } catch {
+      clearAuthStorage()
+      return false
+    }
   }
 
   function setActiveTab(tab: string) {
@@ -316,7 +432,9 @@ export const useAppStore = defineStore('app', () => {
     groupJoinRequests,
     registeredThemes, longtermThemes,
     activeConvId, genId,
+    satoken, imUserId, userSig,
     setUserProfile, setActiveTab, addCreditLog,
+    loginWithPassword, loginWithSms, registerUser, logout, restoreSession,
     handleJoinActivity, handleProcessJoinRequest,
     handleInitiateChat, handleDisconnectConversation,
     handleSendMessage,

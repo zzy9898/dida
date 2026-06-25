@@ -46,7 +46,11 @@
     {
       "path": "pages/verify/verify",
       "style": {
-        "navigationBarTitleText": "学籍认证"
+        "navigationBarTitleText": "学籍认证",
+        // 微信小程序原生图形验证码组件（需将阿里云 captcha4 SDK 放入 wxcomponents/captcha4/）
+        "usingComponents": {
+          "captcha4": "/wxcomponents/captcha4/captcha4"
+        }
       }
     }
   ],

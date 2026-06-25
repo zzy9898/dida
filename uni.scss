@@ -1,0 +1,12 @@
+/**
+ * uni-app 全局 SCSS 变量文件。
+ * 此文件中的变量会被自动注入到每个 SFC，无需手动 @import。
+ * 业务全局样式仍在 styles/global.scss（由 App.vue 引入）。
+ */
+
+// 主题色
+$dida-primary: #2563eb;
+$dida-primary-light: #0ea5e9;
+$dida-danger: #e11d48;
+$dida-text: #262626;
+$dida-text-muted: #a3a3a3;

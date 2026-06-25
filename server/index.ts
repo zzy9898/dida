@@ -138,8 +138,8 @@ app.post("/api/gemini/venue", async (req, res) => {
       console.error("Failed to parse venue response:", text);
       return res.json({
         venues: [
-          { name: ""时间沙漏"高分主题密室逃脱", desc: "能迅速拉近距离的有趣体验，考验你们的默契配合！", type: "桌游休闲" },
-          { name: "校区东侧"森呼吸"音乐咖啡餐吧", desc: "拥有舒适的沙发卡座，晚上有轻音乐驻唱，菜品性价比极高。", type: "美食咖啡" },
+          { name: "「时间沙漏」高分主题密室逃脱", desc: "能迅速拉近距离的有趣体验，考验你们的默契配合！", type: "桌游休闲" },
+          { name: "校区东侧「森呼吸」音乐咖啡餐吧", desc: "拥有舒适的沙发卡座，晚上有轻音乐驻唱，菜品性价比极高。", type: "美食咖啡" },
           { name: "城市奥林匹克攀岩竞技运动中心", desc: "适合富有挑战热情的活力搭子，在这里展现你的帅气运动风采！", type: "运动健康" }
         ],
         fallback: true

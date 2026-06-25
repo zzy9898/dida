@@ -4,8 +4,15 @@ import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 
-onMounted(() => {
+onMounted(async () => {
+  // 已在内存中（同会话内导航回来）直接进首页
   if (store.userProfile) {
+    uni.switchTab({ url: '/pages/home/home' })
+    return
+  }
+  // 尝试用本地令牌恢复登录态（校验 token + 重登 IM）
+  const restored = await store.restoreSession()
+  if (restored) {
     uni.switchTab({ url: '/pages/home/home' })
   } else {
     uni.redirectTo({ url: '/pages/verify/verify' })
