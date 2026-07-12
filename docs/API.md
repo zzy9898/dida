@@ -2,7 +2,7 @@
 
 本文档面向前端对接使用，描述 Dida 后端当前对外开放的 HTTP 接口。所有接口均返回统一的 JSON 响应结构 `Result<T>`。
 
-> 适用范围：用户/鉴权/学校相关接口（共 9 个）。后续新增接口请同步更新本文件。
+> 适用范围：用户/鉴权/学校相关接口（共 10 个）。后续新增接口请同步更新本文件。
 
 ---
 
@@ -384,6 +384,40 @@ POST /users/1001/verifySchool?verifyCode=ABCD1234
 | 该校不在服务范围内 | `code: 404`，`message: "该校不在服务范围内"` |
 | 系统/接口异常 | `code: 500` |
 
+### 3.8 获取头像上传签名 URL
+
+获取一个用于客户端直传头像到阿里云 OSS 的签名 PUT URL。AccessKey 不暴露给客户端，前端拿到 URL 后直接向 OSS 发起 HTTP PUT 上传文件。
+
+- **方法 / 路径**：`POST /users/avatar`
+- **鉴权**：需登录
+- **参数**：无
+- **成功响应**：`data` 为 [SignedUploadUrl](#54-signeduploadurl)。
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "url": "https://dida-common.oss-cn-qingdao.aliyuncs.com/avatar/abc123?Expires=...&OSSAccessKeyId=...&Signature=...",
+    "expireTimeMillis": 1719300300000
+  },
+  "timestamp": 1719300000000
+}
+```
+
+- **失败响应**：生成签名 URL 失败返回 `code: 500`。
+
+**前端上传流程**：
+1. 调用本接口拿到 `url`。
+2. 在 `expireTimeMillis`（毫秒时间戳）之前，直接对 `url` 发起 HTTP `PUT` 请求，请求体为文件二进制内容即可完成上传。
+3. 上传成功后，文件的访问地址即为 `url` 去掉 `?` 后的查询参数部分（需 bucket 允许读取）。
+4. URL 过期后（默认 5 分钟）再次 PUT 将返回 HTTP 403，需重新获取。
+
+```
+PUT https://dida-common.oss-cn-qingdao.aliyuncs.com/avatar/abc123?Expires=...&Signature=...
+（请求体 = 文件二进制内容）
+```
+
 ---
 
 ## 4. 学校接口（`/school`，仅 ADMIN）
@@ -481,13 +515,22 @@ Sa-Token 登录令牌信息。
 | `loginDeviceType` | string | 登录设备类型 |
 | `tag` | string | 自定义标识 |
 
-### 5.4 LoginParam（请求）
+### 5.4 SignedUploadUrl
+
+客户端直传 OSS 所需的签名 PUT URL 及过期时间。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `url` | string | 带签名的 PUT URL，客户端直接向该地址发起 HTTP PUT 上传文件 |
+| `expireTimeMillis` | long | 签名过期时间戳（毫秒），超时后 URL 不可用（OSS 返回 403） |
+
+### 5.5 LoginParam（请求）
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `phone` | string | 是 | 手机号 |
 | `password` | string | 是 | 登录密码 |
 
-### 5.5 RegisterParam（请求）
+### 5.6 RegisterParam（请求）
 
 见 [3.3 注册](#33-注册) 请求体字段表。

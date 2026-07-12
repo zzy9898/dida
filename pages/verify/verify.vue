@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref, onUnmounted, getCurrentInstance, nextTick } from 'vue'
+import { ref, onUnmounted, getCurrentInstance } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { MOCK_SCHOOLS, QUESTIONNAIRE_QUESTIONS } from '@/data/mock'
+import { QUESTIONNAIRE_QUESTIONS } from '@/data/mock'
 import type { GenderType, RegisterParam } from '@/data/types'
 import * as userApi from '@/api/user'
+import { uploadAvatar } from '@/utils/upload'
 import { CAPTCHA_ID } from '@/config'
-// #ifndef MP-WEIXIN
-import { getCaptchaResult } from '@/utils/captcha'
-// #endif
 // #ifdef MP-WEIXIN
 import { beginMpCaptcha, settleMpCaptcha } from '@/utils/captcha'
 // #endif
@@ -15,79 +13,44 @@ import { beginMpCaptcha, settleMpCaptcha } from '@/utils/captcha'
 const store = useAppStore()
 
 // ==================== Stage tracking ====================
-const currentStep = ref<number>(0) // 0:login 1:verify 2:questionnaire 3:profile
+const currentStep = ref<number>(0) // 0:login 1:基本信息 2:兴趣选择
 
 // ==================== Stage 0: Login state ====================
-const authMode = ref<'login' | 'register'>('login')
-const loginMethod = ref<'phone' | 'wechat'>('phone')
 const phoneOrWechatInput = ref('')
-// 登录方式（仅 login + phone 下）：密码 / 短信验证码
+// 登录方式：密码 / 短信验证码
 const loginType = ref<'password' | 'sms'>('password')
 const loginPassword = ref('')
 const loginSmsCode = ref('')
 const loginSmsCountdown = ref(0)
+const smsSending = ref(false) // 短信验证流程进行中（防重入）
 const submitting = ref(false)
-// 微信小程序 captcha4 组件显隐
-const mpCaptchaVisible = ref(false)
-// 注册补充字段（后端必填）
-const realName = ref('')
-const regPassword = ref('')
 
-// ==================== Stage 1: Verify state ====================
-const selectedSchool = ref(MOCK_SCHOOLS[0])
-const emailPrefix = ref('')
-const verificationCode = ref('')
-const isCodeSent = ref(false)
-const countdown = ref(0)
-const verifyError = ref('')
-const verifyTab = ref<'unified' | 'chsi'>('unified')
-const studentId = ref('202600135')
-const unifiedPassword = ref('')
-const smsCode = ref('')
-const chsiCode = ref('')
-const smsCountdown = ref(0)
-
-// ==================== Stage 2: Questionnaire state ====================
-const answers = ref<Record<string, string[]>>({
-  interests: [],
-  activity_prefs: [],
-  personality: []
-})
-
-// ==================== Stage 3: Profile state ====================
+// ==================== Stage 1: Register（基本信息）state ====================
+const phone = ref('')            // 由短信登录环节预填，注册时不再输入
 const nickname = ref('')
-const age = ref(20)
+const realName = ref('')         // → RegisterParam.name
+const regPassword = ref('')
 const gender = ref<GenderType>('FEMALE')
-const selectedAvatarIdx = ref(0)
-const phone = ref('')
-const wechat = ref('')
-const emergencyName = ref('')
-const emergencyPhone = ref('')
-const showSkipModal = ref(false)
+const birthdate = ref('')        // yyyy-MM-dd，后端必填
+const avatarLocalPath = ref('')  // 选好的本地图片，仅用于预览；提交时经 OSS 上传换 imageUrl
 
-// ==================== Avatar presets ====================
-const femaleAvatars = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=150&q=80'
-]
+// 生日最大值：至少 16 岁
+const maxBirthdate = (() => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 16)
+  return d.toISOString().slice(0, 10)
+})()
 
-const maleAvatars = [
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=150&q=80',
-  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=150&q=80'
-]
+// ==================== Stage 2: 兴趣选择 state ====================
+const selectedInterests = ref<string[]>([])
+
+// 兴趣标签选项（复用问卷里的「兴趣爱好」一题）
+const interestOptions = QUESTIONNAIRE_QUESTIONS.find((q) => q.id === 'interests')?.options ?? []
 
 // ==================== Timer references ====================
-let countdownTimer: ReturnType<typeof setInterval> | null = null
-let smsTimer: ReturnType<typeof setInterval> | null = null
 let loginSmsTimer: ReturnType<typeof setInterval> | null = null
 
 onUnmounted(() => {
-  if (countdownTimer) clearInterval(countdownTimer)
-  if (smsTimer) clearInterval(smsTimer)
   if (loginSmsTimer) clearInterval(loginSmsTimer)
 })
 
@@ -96,12 +59,37 @@ function goHome() {
   uni.switchTab({ url: '/pages/home/home' })
 }
 
-// ==================== Stage 0: Login methods ====================
-// 微信登录暂未开放（后端无对应接口）
-function handleWechatDisabled() {
-  uni.showToast({ title: '微信登录敬请期待，请使用手机号', icon: 'none' })
+// ==================== UI 切换方法（避免内联赋值，mp-weixin 兼容） ====================
+function selectLoginType(t: 'password' | 'sms') {
+  loginType.value = t
+}
+function selectGender(g: GenderType) {
+  gender.value = g
+}
+function onBirthdateChange(e: any) {
+  birthdate.value = e.detail.value
+}
+function goBack() {
+  currentStep.value = 1
+}
+// 兴趣标签多选切换
+function toggleInterest(tag: string) {
+  const i = selectedInterests.value.indexOf(tag)
+  if (i >= 0) selectedInterests.value.splice(i, 1)
+  else selectedInterests.value.push(tag)
+}
+// 选择头像（本地预览，提交时再上传 OSS）
+function chooseAvatar() {
+  uni.chooseImage({
+    count: 1,
+    sizeType: ['compressed'],
+    success: (r) => {
+      avatarLocalPath.value = r.tempFilePaths[0]
+    },
+  })
 }
 
+// ==================== Stage 0: Login methods ====================
 function isValidPhone(p: string) {
   return /^1\d{10}$/.test(p)
 }
@@ -129,7 +117,7 @@ async function handlePasswordLogin() {
   }
 }
 
-// 图形验证码统一入口：H5 走 ct4.js；微信小程序走原生 captcha4 组件；其它端降级
+// 图形验证码入口：微信小程序走原生 captcha4 组件；其它端不支持短信登录
 async function requestCaptcha() {
   // #ifdef MP-WEIXIN
   if (!CAPTCHA_ID) {
@@ -137,54 +125,82 @@ async function requestCaptcha() {
     throw new Error('NO_CAPTCHA_ID')
   }
   const p = beginMpCaptcha()
-  mpCaptchaVisible.value = true
-  await nextTick()
-  triggerMpShowCaptcha()
+  showMpCaptcha()
   return await p
   // #endif
   // #ifndef MP-WEIXIN
-  return await getCaptchaResult()
+  uni.showToast({ title: '短信登录请在微信小程序中使用', icon: 'none' })
+  throw new Error('CAPTCHA_UNSUPPORTED_PLATFORM')
   // #endif
 }
 
 // #ifdef MP-WEIXIN
-function triggerMpShowCaptcha() {
-  const inst = getCurrentInstance()
-  const comp = (inst?.proxy as any)?.selectComponent?.('#aliCaptcha')
-  if (comp && typeof comp.showCaptcha === 'function') comp.showCaptcha()
+// 缓存当前页面实例（用于取原生 captcha4 组件）
+const mpInstance = getCurrentInstance()
+// 组件尚未就绪时点了「获取验证码」，标记待弹出，@ready 后兜底触发
+let pendingShow = false
+// @close 延迟取消的定时器（成功时组件会先 close 再 success）
+let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+// 取原生组件实例：uni-app Vue3 的 proxy 上没有 selectComponent，需走原生页面实例
+function getCaptchaComp(): any {
+  const proxy = mpInstance?.proxy as any
+  const native = proxy?.$scope || proxy?.$mp?.page || proxy
+  return native?.selectComponent?.('#aliCaptcha')
+}
+function showMpCaptcha() {
+  const comp = getCaptchaComp()
+  if (comp && typeof comp.showCaptcha === 'function') {
+    pendingShow = false
+    comp.showCaptcha()
+  } else {
+    pendingShow = true // 等组件 @ready 后再弹
+  }
 }
 function onCaptchaReady() {
-  // 组件就绪后兜底弹出
-  triggerMpShowCaptcha()
+  if (pendingShow) showMpCaptcha()
 }
 function onCaptchaSuccess(e: any) {
-  settleMpCaptcha(true, e?.detail)
-  mpCaptchaVisible.value = false
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+  const d = e?.detail ?? e
+  settleMpCaptcha(true, d)
 }
 function onCaptchaError(e: any) {
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+  uni.showToast({ title: '图形验证失败，请重试', icon: 'none' })
   settleMpCaptcha(false, e?.detail)
-  mpCaptchaVisible.value = false
 }
 function onCaptchaClose() {
-  settleMpCaptcha(false)
-  mpCaptchaVisible.value = false
+  // 成功时组件会「先 @close 再 @success」，故延迟判定：若随后 success/error 到达则不取消
+  if (closeTimer) clearTimeout(closeTimer)
+  closeTimer = setTimeout(() => {
+    closeTimer = null
+    settleMpCaptcha(false)
+  }, 300)
 }
 // #endif
 
 // 发送短信验证码（先过阿里云图形验证码）
 async function handleSendLoginSms() {
   if (loginSmsCountdown.value > 0) return
+  if (smsSending.value) return // 防重入：验证进行中重复点击会触发 CAPTCHA_RESTARTED
   if (!isValidPhone(phoneOrWechatInput.value)) {
     uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
     return
   }
+  smsSending.value = true
   try {
     const captcha = await requestCaptcha()
     await userApi.getSmsCode({ ...captcha, phone_number: phoneOrWechatInput.value })
     uni.showToast({ title: '验证码已发送', icon: 'success' })
     startLoginSmsCountdown()
   } catch {
-    // 用户取消图形验证 / 平台不支持 / 下发失败：相关提示已在各自处理
+    // 失败均已在各环节给出提示：
+    // - 用户取消验证 / 平台不支持 / 未配置：requestCaptcha 已 toast 或属主动取消，静默；
+    // - 图形验证报错：onCaptchaError 已 toast；
+    // - getSmsCode 失败（参数/网络/服务异常）：request 层已统一 toast 友好文案。
+  } finally {
+    smsSending.value = false
   }
 }
 
@@ -219,10 +235,10 @@ async function handleSmsLogin() {
       uni.showToast({ title: '登录成功', icon: 'success' })
       goHome()
     } else {
-      // 未注册，引导去注册流程
-      uni.showToast({ title: '该手机号未注册，请先完成注册', icon: 'none', duration: 2000 })
+      // 未注册：自动拉起注册流程（手机号预填）
+      uni.showToast({ title: '该手机号未注册，请完成注册', icon: 'none', duration: 2000 })
       phone.value = phoneOrWechatInput.value
-      authMode.value = 'register'
+      currentStep.value = 1
     }
   } catch {
     // 错误信息已由 request 层 toast
@@ -231,129 +247,11 @@ async function handleSmsLogin() {
   }
 }
 
-function handlePhoneRegister() {
-  if (!isValidPhone(phoneOrWechatInput.value)) {
-    uni.showToast({ title: '请输入正确的11位中国手机号！', icon: 'none' })
-    return
-  }
-  phone.value = phoneOrWechatInput.value
-  currentStep.value = 1
-}
-
-// ==================== Stage 1: Email code (legacy) ====================
-function handleSendCode() {
-  if (!emailPrefix.value.trim()) {
-    verifyError.value = '请输入邮箱前缀'
-    return
-  }
-  verifyError.value = ''
-  isCodeSent.value = true
-  countdown.value = 60
-  if (countdownTimer) clearInterval(countdownTimer)
-  countdownTimer = setInterval(() => {
-    if (countdown.value <= 1) {
-      if (countdownTimer) clearInterval(countdownTimer)
-      countdown.value = 0
-      return
-    }
-    countdown.value--
-  }, 1000)
-}
-
-function handleMailVerify() {
-  if (verificationCode.value === '1234' || verificationCode.value === '8888') {
-    verifyError.value = ''
-    currentStep.value = 2
-  } else {
-    verifyError.value = "验证码错误，试一试'1234'或者'8888'快速通过"
-  }
-}
-
-// ==================== Stage 1: SMS countdown ====================
-function handleSendVerifySms() {
-  if (smsCountdown.value > 0) return
-  verifyError.value = ''
-  smsCountdown.value = 60
-  smsCode.value = '888888'
-  if (smsTimer) clearInterval(smsTimer)
-  smsTimer = setInterval(() => {
-    if (smsCountdown.value <= 1) {
-      if (smsTimer) clearInterval(smsTimer)
-      smsCountdown.value = 0
-      return
-    }
-    smsCountdown.value--
-  }, 1000)
-}
-
-function handleVerifyStep1() {
-  verifyError.value = ''
-  if (verifyTab.value === 'unified') {
-    if (!studentId.value.trim()) {
-      verifyError.value = '请输入统一认证账号（学号）'
-      return
-    }
-    if (!unifiedPassword.value.trim()) {
-      verifyError.value = '请输入统一认证密码'
-      return
-    }
-    if (!smsCode.value.trim()) {
-      verifyError.value = '请输入短信验证码'
-      return
-    }
-    if (smsCode.value === '888888' || smsCode.value === '1234' || smsCode.value === '8888' || smsCode.value.length >= 4) {
-      emailPrefix.value = studentId.value
-      currentStep.value = 2
-    } else {
-      verifyError.value = "短信验证码错误！用演示码'888888'快速登录。"
-    }
-  } else {
-    if (!chsiCode.value.trim()) {
-      verifyError.value = '请输入16位学信网在线验证码'
-      return
-    }
-    const cleanedChsi = chsiCode.value.trim().toUpperCase()
-    if (cleanedChsi === '1234ABCD5678WXYZ' || cleanedChsi === '1234' || cleanedChsi.length >= 4) {
-      emailPrefix.value = 'chsi_' + cleanedChsi.slice(0, 8)
-      currentStep.value = 2
-    } else {
-      verifyError.value = "学信网验证码无效！用演示码'1234ABCD5678WXYZ'快速通过。"
-    }
-  }
-}
-
-// ==================== Stage 2: Questionnaire methods ====================
-function handleToggleOption(questionId: string, option: string) {
-  const selected = answers.value[questionId] || []
-  const index = selected.indexOf(option)
-  if (index >= 0) {
-    answers.value[questionId] = selected.filter((item) => item !== option)
-  } else {
-    answers.value[questionId] = [...selected, option]
-  }
-}
-
-function handleFinishQuestionnaire() {
-  if (answers.value.interests.length === 0) {
-    uni.showToast({ title: '请至少选择一项你感兴趣的爱好！', icon: 'none' })
-    return
-  }
-  if (answers.value.activity_prefs.length === 0) {
-    uni.showToast({ title: '请至少选择一个活动偏好！', icon: 'none' })
-    return
-  }
-  if (answers.value.personality.length === 0) {
-    uni.showToast({ title: '请至少选择一个符合你性格的标签！', icon: 'none' })
-    return
-  }
-  currentStep.value = 3
-}
-
-// ==================== Stage 3: Profile methods ====================
-// 提交注册：组装 RegisterParam 调后端注册（成功后即登录 + IM 登录）
-async function submitRegister() {
+// ==================== Stage 1: Register（基本信息）methods ====================
+// Step 1 校验通过后进入兴趣选择页
+function goToInterests() {
   if (!nickname.value.trim()) {
-    uni.showToast({ title: '请输入你的专属昵称！', icon: 'none' })
+    uni.showToast({ title: '请输入昵称', icon: 'none' })
     return
   }
   if (!realName.value.trim()) {
@@ -364,23 +262,41 @@ async function submitRegister() {
     uni.showToast({ title: '登录密码至少 6 位', icon: 'none' })
     return
   }
+  if (!birthdate.value) {
+    uni.showToast({ title: '请选择出生日期', icon: 'none' })
+    return
+  }
   if (!phone.value) {
     uni.showToast({ title: '注册手机号缺失，请返回首页重新开始', icon: 'none' })
     return
   }
+  currentStep.value = 2
+}
+
+// 提交注册：组装 RegisterParam 调后端注册（成功后即登录 + IM 登录）
+async function submitRegister() {
   if (submitting.value) return
   submitting.value = true
 
-  const avatarSet = gender.value === 'MALE' ? maleAvatars : femaleAvatars
-  const finalAvatar = avatarSet[selectedAvatarIdx.value] || avatarSet[0]
+  // 头像：本地图片经 OSS 预签名 URL 上传换 imageUrl（后端未就绪时返回 ''）
+  let imageUrl = ''
+  if (avatarLocalPath.value) {
+    try {
+      imageUrl = await uploadAvatar(avatarLocalPath.value)
+    } catch {
+      // 上传失败不阻断注册，imageUrl 留空
+    }
+  }
+
   const param: RegisterParam = {
     phone: phone.value,
     password: regPassword.value,
     nickname: nickname.value.trim(),
     name: realName.value.trim(),
     gender: gender.value === 'OTHER' ? 'UNKNOWN' : gender.value,
-    interestTags: answers.value.interests,
-    imageUrl: finalAvatar,
+    birthdate: birthdate.value || undefined,
+    interestTags: selectedInterests.value.length ? selectedInterests.value : undefined,
+    imageUrl: imageUrl || undefined,
   }
 
   try {
@@ -397,16 +313,6 @@ async function submitRegister() {
 function handleFormSubmit() {
   submitRegister()
 }
-
-// 跳过紧急联系人填写（姓名/密码/昵称为后端必填，仍需完成）
-function handleSkip() {
-  showSkipModal.value = false
-  submitRegister()
-}
-
-// ==================== Stage indicator helpers ====================
-// Show dots for steps 1-3 (verify, questionnaire, profile)
-const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
 </script>
 
 <template>
@@ -422,164 +328,78 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
           </view>
           <text class="brand-desc">实名制高校潮流社交活动平台。在这里呼叫合拍的搭子，轻松拼游。</text>
 
-          <!-- Login/Register toggle -->
-          <view class="toggle-row">
-            <view
-              class="toggle-btn"
-              :class="{ active: authMode === 'login' }"
-              @tap="authMode = 'login'"
-            >
-              <text>已注册用户登录</text>
+          <!-- Phone login（仅手机号：密码 / 短信验证码） -->
+          <view class="phone-login-area">
+            <view class="phone-input-wrap">
+              <text class="phone-prefix">+86 中国</text>
+              <input
+                type="number"
+                placeholder="请输入手机号"
+                v-model="phoneOrWechatInput"
+                maxlength="11"
+                class="phone-input"
+              />
             </view>
-            <view
-              class="toggle-btn"
-              :class="{ active: authMode === 'register' }"
-              @tap="authMode = 'register'"
-            >
-              <text>新用户注册认证</text>
-            </view>
-          </view>
 
-          <!-- WeChat / Phone method toggle -->
-          <view class="method-toggle-row">
-            <view
-              class="method-btn"
-              :class="{ active: loginMethod === 'wechat' }"
-              @tap="loginMethod = 'wechat'"
-            >
-              <text>微信关联</text>
-            </view>
-            <view
-              class="method-btn"
-              :class="{ active: loginMethod === 'phone' }"
-              @tap="loginMethod = 'phone'"
-            >
-              <text>手机快捷键</text>
-            </view>
-          </view>
-
-          <!-- Login mode content -->
-          <template v-if="authMode === 'login'">
-            <!-- WeChat login (disabled, 后端暂无接口) -->
-            <view v-if="loginMethod === 'wechat'" class="login-card wechat-card">
-              <view class="card-icon-wrap wechat-icon-bg">
-                <text class="card-icon-emoji">&#10003;</text>
+            <!-- 登录方式：密码 / 短信验证码 -->
+            <view class="toggle-row">
+              <view
+                class="toggle-btn"
+                :class="{ active: loginType === 'password' }"
+                @tap="selectLoginType('password')"
+              >
+                <text>密码登录</text>
               </view>
-              <text class="card-title">微信登录敬请期待</text>
-              <text class="card-desc">当前暂未开放微信登录，请使用手机号登录</text>
-              <view class="card-btn disabled-btn" @tap="handleWechatDisabled">
-                <text>暂未开放</text>
+              <view
+                class="toggle-btn"
+                :class="{ active: loginType === 'sms' }"
+                @tap="selectLoginType('sms')"
+              >
+                <text>短信验证码</text>
               </view>
             </view>
 
-            <!-- Phone login (existing user) -->
-            <view v-else class="phone-login-area">
-              <view class="phone-input-wrap">
-                <text class="phone-prefix">+86 中国</text>
+            <!-- 密码登录 -->
+            <template v-if="loginType === 'password'">
+              <view class="input-card">
+                <text class="input-label">登录密码</text>
                 <input
-                  type="number"
-                  placeholder="输入已注册手机号（如 13988886666）"
-                  v-model="phoneOrWechatInput"
-                  maxlength="11"
-                  class="phone-input"
+                  type="password"
+                  v-model="loginPassword"
+                  placeholder="请输入登录密码"
+                  class="input-field"
                 />
               </view>
-
-              <!-- 登录方式：密码 / 短信验证码 -->
-              <view class="toggle-row">
-                <view
-                  class="toggle-btn"
-                  :class="{ active: loginType === 'password' }"
-                  @tap="loginType = 'password'"
-                >
-                  <text>密码登录</text>
-                </view>
-                <view
-                  class="toggle-btn"
-                  :class="{ active: loginType === 'sms' }"
-                  @tap="loginType = 'sms'"
-                >
-                  <text>短信验证码</text>
-                </view>
+              <view class="card-btn primary-btn" @tap="handlePasswordLogin">
+                <text>{{ submitting ? '登录中...' : '登录' }}</text>
               </view>
+            </template>
 
-              <!-- 密码登录 -->
-              <template v-if="loginType === 'password'">
-                <view class="input-card">
-                  <text class="input-label">登录密码</text>
+            <!-- 短信验证码登录 -->
+            <template v-else>
+              <view class="sms-row">
+                <view class="input-card sms-input-card">
+                  <text class="input-label">短信验证码</text>
                   <input
-                    type="password"
-                    v-model="loginPassword"
-                    placeholder="请输入登录密码"
+                    type="number"
+                    v-model="loginSmsCode"
+                    placeholder="请输入 6 位短信验证码"
+                    maxlength="6"
                     class="input-field"
                   />
                 </view>
-                <view class="card-btn primary-btn" @tap="handlePasswordLogin">
-                  <text>{{ submitting ? '登录中...' : '登录' }}</text>
+                <view class="sms-btn" :class="{ disabled: loginSmsCountdown > 0 }" @tap="handleSendLoginSms">
+                  <text>{{ loginSmsCountdown > 0 ? loginSmsCountdown + 's' : '获取验证码' }}</text>
                 </view>
-              </template>
-
-              <!-- 短信验证码登录 -->
-              <template v-else>
-                <view class="sms-row">
-                  <view class="input-card sms-input-card">
-                    <text class="input-label">短信验证码（6位）</text>
-                    <input
-                      type="number"
-                      v-model="loginSmsCode"
-                      placeholder="请输入 6 位短信验证码"
-                      maxlength="6"
-                      class="input-field"
-                    />
-                  </view>
-                  <view class="sms-btn" :class="{ disabled: loginSmsCountdown > 0 }" @tap="handleSendLoginSms">
-                    <text>{{ loginSmsCountdown > 0 ? loginSmsCountdown + 's' : '获取验证码' }}</text>
-                  </view>
-                </view>
-                <view class="info-tip">
-                  <text>提示：获取验证码需完成图形验证（仅 H5 支持）。未注册手机号将引导去注册。</text>
-                </view>
-                <view class="card-btn primary-btn" @tap="handleSmsLogin">
-                  <text>{{ submitting ? '登录中...' : '登录' }}</text>
-                </view>
-              </template>
-            </view>
-          </template>
-
-          <!-- Register mode content -->
-          <template v-else>
-            <!-- WeChat register (disabled, 后端暂无接口) -->
-            <view v-if="loginMethod === 'wechat'" class="login-card register-card">
-              <view class="card-icon-wrap register-icon-bg">
-                <text class="card-icon-emoji">&#9786;</text>
               </view>
-              <text class="card-title">微信注册敬请期待</text>
-              <text class="card-desc">当前暂未开放微信注册，请使用手机号注册</text>
-              <view class="card-btn disabled-btn" @tap="handleWechatDisabled">
-                <text>暂未开放</text>
+              <view class="info-tip">
+                <text>提示：获取验证码前需完成图形验证。未注册手机号将自动进入注册流程。</text>
               </view>
-            </view>
-
-            <!-- Phone register -->
-            <view v-else class="phone-login-area">
-              <view class="phone-input-wrap">
-                <text class="phone-prefix">+86 中国</text>
-                <input
-                  type="number"
-                  placeholder="请输入您的注册手机号"
-                  v-model="phoneOrWechatInput"
-                  maxlength="11"
-                  class="phone-input"
-                />
+              <view class="card-btn primary-btn" @tap="handleSmsLogin">
+                <text>{{ submitting ? '登录中...' : '登录' }}</text>
               </view>
-              <view class="info-tip warn-tip">
-                <text>提示：由于是新用户，获取验证码后将引导您去进行 高校统一认证学籍校验 噢！</text>
-              </view>
-              <view class="card-btn primary-btn" @tap="handlePhoneRegister">
-                <text>获取验证码注册，并开启学籍校验</text>
-              </view>
-            </view>
-          </template>
+            </template>
+          </view>
 
           <!-- Bottom security badge -->
           <view class="security-badge">
@@ -589,192 +409,40 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
         </view>
       </view>
 
-      <!-- ==================== STAGE 1: VERIFY ==================== -->
-      <view v-if="currentStep === 1" class="stage-content stage-verify">
+      <!-- ==================== STAGE 1: REGISTER（基本信息）==================== -->
+      <view v-if="currentStep === 1" class="stage-content stage-profile">
         <view class="stage-inner">
-          <!-- Header -->
           <view class="stage-header">
-            <text class="stage-badge">第一步：学籍校验</text>
+            <text class="stage-badge">完善基本信息</text>
           </view>
-          <text class="stage-title">学生身份验证</text>
-          <text class="stage-desc">为保障真实安全的社交环境，需完成校园身份认证，该步骤不可跳过。</text>
+          <text class="stage-title">创建你的滴答账号</text>
+          <text class="stage-desc">填写以下基本信息即可完成注册，无需学籍认证。</text>
 
-          <!-- Verify tab toggle -->
-          <view class="toggle-row">
-            <view
-              class="toggle-btn"
-              :class="{ active: verifyTab === 'unified' }"
-              @tap="verifyTab = 'unified'"
-            >
-              <text>学校统一认证</text>
-            </view>
-            <view
-              class="toggle-btn"
-              :class="{ active: verifyTab === 'chsi' }"
-              @tap="verifyTab = 'chsi'"
-            >
-              <text>学信网报告</text>
-            </view>
-          </view>
-
-          <!-- Unified auth form -->
-          <template v-if="verifyTab === 'unified'">
-            <view class="form-group">
-              <view class="input-card">
-                <text class="input-label">统一认证账号（学号）</text>
-                <input
-                  type="text"
-                  v-model="studentId"
-                  placeholder="请输入您的学号"
-                  class="input-field"
-                />
-              </view>
-
-              <view class="input-card">
-                <text class="input-label">统一认证密码</text>
-                <input
-                  type="password"
-                  v-model="unifiedPassword"
-                  placeholder="请输入高校门户密码"
-                  class="input-field"
-                />
-              </view>
-
-              <view class="sms-row">
-                <view class="input-card sms-input-card">
-                  <text class="input-label">短信验证码（6位）</text>
-                  <input
-                    type="number"
-                    v-model="smsCode"
-                    placeholder="请输入 6 位短信验证码"
-                    maxlength="6"
-                    class="input-field"
-                  />
-                </view>
-                <view class="sms-btn" :class="{ disabled: smsCountdown > 0 }" @tap="handleSendVerifySms">
-                  <text>{{ smsCountdown > 0 ? smsCountdown + 's' : '获取验证码' }}</text>
-                </view>
-              </view>
-
-              <text class="form-hint">
-                校验账号密码后，将向统一认证绑定的手机号发送 6 位短信验证码（演示码 888888）。
-              </text>
-            </view>
-          </template>
-
-          <!-- CHSI form -->
-          <template v-else>
-            <view class="form-group">
-              <view class="input-card">
-                <text class="input-label">学信网在线验证码（16位）</text>
-                <input
-                  type="text"
-                  v-model="chsiCode"
-                  placeholder="报告右上角的 16 位在线验证码"
-                  maxlength="19"
-                  class="input-field"
-                />
-              </view>
-              <text class="form-hint">
-                登录学信网 (chsi.com.cn) 申请《教育部学籍在线验证报告》，输入报告上的 16 位在线验证码（演示码 1234ABCD5678WXYZ）。
-              </text>
-            </view>
-          </template>
-
-          <!-- Error message -->
-          <view v-if="verifyError" class="error-msg">
-            <text>⚠️ {{ verifyError }}</text>
-          </view>
-
-          <!-- Action button + dots -->
-          <view class="stage-footer">
-            <view class="card-btn primary-btn" @tap="handleVerifyStep1">
-              <text>验证并继续</text>
-            </view>
-            <!-- Stage indicator dots: 3 dots represent steps 1-3 -->
-            <view class="stage-dots">
-              <view class="dot active"></view>
-              <view class="dot"></view>
-              <view class="dot"></view>
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <!-- ==================== STAGE 2: QUESTIONNAIRE ==================== -->
-      <view v-if="currentStep === 2" class="stage-content stage-questionnaire">
-        <view class="stage-inner">
-          <!-- Header -->
-          <view class="stage-header">
-            <text class="stage-badge">第二步：偏好问卷</text>
-          </view>
-          <text class="stage-title">构建你的专属校园画像</text>
-          <text class="stage-desc">简单定制社交偏置，以配对相同活性的同行伴侣！</text>
-
-          <!-- Questions -->
-          <view class="questions-list">
-            <view
-              v-for="q in QUESTIONNAIRE_QUESTIONS"
-              :key="q.id"
-              class="question-card"
-            >
-              <text class="q-dimension">专题维度 · MATCH PREFER</text>
-              <text class="q-text">{{ q.text }}</text>
-              <view class="q-options">
-                <view
-                  v-for="opt in q.options"
-                  :key="opt"
-                  class="q-option"
-                  :class="{ selected: (answers[q.id] || []).includes(opt) }"
-                  @tap="handleToggleOption(q.id, opt)"
-                >
-                  <text>{{ opt }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-
-          <!-- Action button + dots -->
-          <view class="stage-footer">
-            <view class="card-btn primary-btn" @tap="handleFinishQuestionnaire">
-              <text>下一步：完善个人名片并激活安全系统</text>
-            </view>
-            <view class="stage-dots">
-              <view class="dot done"></view>
-              <view class="dot active"></view>
-              <view class="dot"></view>
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <!-- ==================== STAGE 3: PROFILE ==================== -->
-      <view v-if="currentStep === 3" class="stage-content stage-profile">
-        <view class="stage-inner">
-          <!-- Header with skip button -->
-          <view class="profile-header-row">
-            <view class="stage-header">
-              <text class="stage-badge">第三步：真实名片配置</text>
-            </view>
-            <view class="skip-link" @tap="showSkipModal = true">
-              <text>跳过此步</text>
-            </view>
-          </view>
-          <text class="stage-title">完善个人档案与安全联系人</text>
-          <text class="stage-desc">
-            填写姓名与紧急联系人信息。紧急联系人号码将成为线下见面时守护你安全的SOS终极依靠（未设置时紧急按钮不可用）。
-          </text>
-
-          <!-- Profile form -->
           <view class="profile-form">
-            <!-- Nickname -->
             <view class="profile-card">
+              <!-- Avatar upload（阿里云 OSS 预签名 URL，提交时上传） -->
+              <view class="avatar-section">
+                <text class="input-label">头像（选填）</text>
+                <view class="avatar-upload" @tap="chooseAvatar">
+                  <image
+                    v-if="avatarLocalPath"
+                    :src="avatarLocalPath"
+                    mode="aspectFill"
+                    class="avatar-preview"
+                  />
+                  <view v-else class="avatar-placeholder">
+                    <text class="avatar-plus">＋</text>
+                    <text class="avatar-hint">上传头像</text>
+                  </view>
+                </view>
+              </view>
+
               <view class="input-card">
                 <text class="input-label">昵称</text>
                 <input
                   type="text"
                   v-model="nickname"
-                  placeholder="请输入用户名/真实昵称"
+                  placeholder="请输入昵称"
                   class="input-field"
                 />
               </view>
@@ -784,7 +452,7 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
                 <input
                   type="text"
                   v-model="realName"
-                  placeholder="请输入真实姓名（用于实名认证）"
+                  placeholder="请输入真实姓名"
                   class="input-field"
                 />
               </view>
@@ -799,141 +467,120 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
                 />
               </view>
 
-              <!-- Age + Gender row -->
-              <view class="age-gender-row">
-                <view class="input-card half-card">
-                  <text class="input-label">真实年龄</text>
-                  <input
-                    type="number"
-                    v-model.number="age"
-                    placeholder="20"
-                    class="input-field"
-                  />
-                </view>
-                <view class="gender-card half-card">
-                  <text class="input-label">我的性别</text>
-                  <view class="gender-toggle">
-                    <view
-                      class="gender-btn"
-                      :class="{ active: gender === 'FEMALE' }"
-                      @tap="gender = 'FEMALE'; selectedAvatarIdx = 0"
-                    >
-                      <text>女生</text>
-                    </view>
-                    <view
-                      class="gender-btn"
-                      :class="{ active: gender === 'MALE' }"
-                      @tap="gender = 'MALE'; selectedAvatarIdx = 0"
-                    >
-                      <text>男生</text>
-                    </view>
-                  </view>
-                </view>
-              </view>
-
-              <!-- Avatar selection -->
-              <view class="avatar-section">
-                <text class="input-label">选择头像</text>
-                <view class="avatar-row">
+              <!-- Gender -->
+              <view class="gender-card">
+                <text class="input-label">性别</text>
+                <view class="gender-toggle">
                   <view
-                    v-for="(avatar, idx) in (gender === 'MALE' ? maleAvatars : femaleAvatars)"
-                    :key="idx"
-                    class="avatar-item"
-                    :class="{ selected: selectedAvatarIdx === idx }"
-                    @tap="selectedAvatarIdx = idx"
+                    class="gender-btn"
+                    :class="{ active: gender === 'FEMALE' }"
+                    @tap="selectGender('FEMALE')"
                   >
-                    <image :src="avatar" mode="aspectFill" class="avatar-img" />
-                    <view v-if="selectedAvatarIdx === idx" class="avatar-check">
-                      <text>&#10003;</text>
-                    </view>
+                    <text>女生</text>
+                  </view>
+                  <view
+                    class="gender-btn"
+                    :class="{ active: gender === 'MALE' }"
+                    @tap="selectGender('MALE')"
+                  >
+                    <text>男生</text>
                   </view>
                 </view>
               </view>
-            </view>
 
-            <!-- Emergency contact -->
-            <view class="emergency-card">
-              <view class="emergency-header">
-                <text class="emergency-icon">&#128737;</text>
-                <text class="emergency-title">24小时紧急安全守护人</text>
-              </view>
-              <text class="emergency-desc">
-                如在活动中遇到紧急纠纷或安全威胁，长按屏幕角落悬浮的SOS按钮3s以上。系统将自动调用即时定位并向该联系人发送特战警报。
-              </text>
-              <view class="emergency-inputs">
-                <view class="input-card half-card">
-                  <text class="input-label">联系人姓名</text>
-                  <input
-                    type="text"
-                    v-model="emergencyName"
-                    placeholder="父母/辅导员"
-                    class="input-field"
-                  />
+              <!-- Birthdate picker -->
+              <picker
+                mode="date"
+                :value="birthdate"
+                start="1960-01-01"
+                :end="maxBirthdate"
+                @change="onBirthdateChange"
+              >
+                <view class="input-card">
+                  <text class="input-label">出生日期</text>
+                  <view class="picker-row">
+                    <text :class="['picker-value', { placeholder: !birthdate }]">
+                      {{ birthdate || '请选择（必填）' }}
+                    </text>
+                    <text class="picker-arrow">›</text>
+                  </view>
                 </view>
-                <view class="input-card half-card">
-                  <text class="input-label">联系电话</text>
-                  <input
-                    type="number"
-                    v-model="emergencyPhone"
-                    placeholder="联系电话"
-                    class="input-field"
-                  />
-                </view>
-              </view>
+              </picker>
             </view>
           </view>
 
-          <!-- Submit button + dots -->
           <view class="stage-footer">
-            <view class="card-btn primary-btn submit-btn" @tap="handleFormSubmit">
-              <text>绑定学籍信息并进入"滴答"</text>
-            </view>
-            <view class="stage-dots">
-              <view class="dot done"></view>
-              <view class="dot done"></view>
-              <view class="dot active"></view>
+            <view class="card-btn primary-btn submit-btn" @tap="goToInterests">
+              <text>下一步，选择兴趣 →</text>
             </view>
           </view>
         </view>
       </view>
+
+      <!-- ==================== STAGE 2: 兴趣选择 ==================== -->
+      <view v-if="currentStep === 2" class="stage-content stage-interests">
+        <view class="stage-inner">
+          <!-- Header with back -->
+          <view class="interests-header">
+            <view class="back-btn" @tap="goBack">
+              <text>‹ 返回修改</text>
+            </view>
+            <text class="stage-title">选择你的兴趣</text>
+            <text class="stage-desc">帮助我们为你匹配合拍的搭子，可跳过</text>
+          </view>
+
+          <!-- Interest chips grid -->
+          <view class="interests-grid">
+            <view
+              v-for="tag in interestOptions"
+              :key="tag"
+              class="interest-chip"
+              :class="{ selected: selectedInterests.includes(tag) }"
+              @tap="toggleInterest(tag)"
+            >
+              <text>{{ tag }}</text>
+            </view>
+          </view>
+
+          <!-- Footer -->
+          <view class="stage-footer">
+            <view class="card-btn primary-btn submit-btn" @tap="handleFormSubmit">
+              <text>{{ submitting ? '注册中...' : '完成注册，进入滴答' }}</text>
+            </view>
+            <view class="skip-tip" @tap="handleFormSubmit">
+              <text>跳过，直接注册</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
     </scroll-view>
 
     <!-- ==================== 微信小程序图形验证码（原生 captcha4 组件） ==================== -->
     <!-- #ifdef MP-WEIXIN -->
     <captcha4
       id="aliCaptcha"
-      v-if="mpCaptchaVisible"
       :captchaId="CAPTCHA_ID"
-      @ready="onCaptchaReady"
-      @success="onCaptchaSuccess"
-      @error="onCaptchaError"
-      @close="onCaptchaClose"
-      @fail="onCaptchaError"
+      :useNativeButton="false"
+      @Ready="onCaptchaReady"
+      @Success="onCaptchaSuccess"
+      @Error="onCaptchaError"
+      @Close="onCaptchaClose"
     />
     <!-- #endif -->
 
-    <!-- ==================== SKIP MODAL ==================== -->
-    <view v-if="showSkipModal" class="modal-overlay" @tap="showSkipModal = false">
-      <view class="modal-card" @tap.stop>
-        <view class="modal-icon-wrap">
-          <text class="modal-icon">&#9888;</text>
-        </view>
-        <text class="modal-title">提示</text>
-        <text class="modal-desc">如果不完善资料可能会影响你的合拍概率。</text>
-        <view class="modal-actions">
-          <view class="modal-btn skip-btn" @tap="handleSkip">
-            <text>继续跳过</text>
-          </view>
-          <view class="modal-btn confirm-btn" @tap="showSkipModal = false">
-            <text>返回填写</text>
-          </view>
-        </view>
-      </view>
-    </view>
   </view>
 </template>
 
 <style scoped>
+/* 统一盒模型：让 width:100% + padding 的元素（按钮/弹窗/输入框）不溢出屏幕 */
+.verify-container,
+.verify-container view,
+.verify-container input,
+.verify-container scroll-view {
+  box-sizing: border-box;
+}
+
 /* ==================== Container ==================== */
 .verify-container {
   width: 100vw;
@@ -1060,94 +707,7 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
 }
 
-.method-toggle-row {
-  display: flex;
-  background: rgba(242, 242, 242, 0.6);
-  border-radius: 16rpx;
-  padding: 4rpx;
-  margin-bottom: 28rpx;
-  border: 1rpx solid rgba(0, 0, 0, 0.02);
-}
-
-.method-btn {
-  flex: 1;
-  text-align: center;
-  padding: 12rpx 0;
-  border-radius: 12rpx;
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #a3a3a3;
-  transition: all 0.2s;
-}
-
-.method-btn.active {
-  background: #fff;
-  color: #404040;
-  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.04);
-}
-
-/* ==================== Login Cards ==================== */
-.login-card {
-  background: #fff;
-  border-radius: 24rpx;
-  padding: 40rpx 32rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 36rpx;
-}
-
-.wechat-card {
-  border: 1rpx solid rgba(16, 185, 129, 0.2);
-  background: rgba(240, 253, 244, 0.5);
-}
-
-.register-card {
-  border: 1rpx solid rgba(37, 99, 235, 0.1);
-  background: rgba(239, 246, 255, 0.5);
-}
-
-.card-icon-wrap {
-  width: 88rpx;
-  height: 88rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 24rpx;
-}
-
-.wechat-icon-bg {
-  background: #10b981;
-  color: #fff;
-}
-
-.register-icon-bg {
-  background: #2563eb;
-  color: #fff;
-  box-shadow: 0 4rpx 16rpx rgba(37, 99, 235, 0.2);
-}
-
-.card-icon-emoji {
-  font-size: 40rpx;
-  font-weight: 900;
-}
-
-.card-title {
-  font-size: 30rpx;
-  font-weight: 800;
-  color: #262626;
-  margin-bottom: 8rpx;
-}
-
-.card-desc {
-  font-size: 22rpx;
-  color: #a3a3a3;
-  text-align: center;
-  line-height: 1.5;
-  margin-bottom: 28rpx;
-}
-
+/* ==================== Login Buttons ==================== */
 .card-btn {
   width: 100%;
   text-align: center;
@@ -1161,15 +721,6 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
 
 .card-btn:active {
   transform: scale(0.98);
-}
-
-.wechat-btn {
-  background: #10b981;
-}
-
-.disabled-btn {
-  background: #d4d4d4;
-  color: #fff;
 }
 
 .primary-btn {
@@ -1226,15 +777,6 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   font-weight: 600;
 }
 
-.warn-tip {
-  background: rgba(255, 241, 242, 0.5);
-  border: 1rpx solid rgba(244, 63, 94, 0.1);
-}
-
-.warn-tip text {
-  color: #e11d48;
-}
-
 /* ==================== Security Badge ==================== */
 .security-badge {
   display: flex;
@@ -1259,10 +801,6 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
 }
 
 /* ==================== Form Inputs ==================== */
-.form-group {
-  margin-bottom: 8rpx;
-}
-
 .input-card {
   background: #f8f9fa;
   border: 1rpx solid #f0f0f0;
@@ -1328,137 +866,7 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   transform: scale(0.98);
 }
 
-.form-hint {
-  font-size: 22rpx;
-  color: #a3a3a3;
-  line-height: 1.6;
-  display: block;
-  margin-top: 8rpx;
-}
-
-/* ==================== Error Message ==================== */
-.error-msg {
-  background: #fff1f2;
-  border: 1rpx solid rgba(244, 63, 94, 0.1);
-  border-radius: 16rpx;
-  padding: 20rpx 24rpx;
-  margin-top: 20rpx;
-}
-
-.error-msg text {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #e11d48;
-}
-
-/* ==================== Stage Dots ==================== */
-.stage-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  padding-top: 28rpx;
-}
-
-.dot {
-  width: 16rpx;
-  height: 16rpx;
-  border-radius: 50%;
-  background: #e5e5e5;
-  transition: all 0.3s;
-}
-
-.dot.active {
-  width: 40rpx;
-  border-radius: 8rpx;
-  background: #2563eb;
-}
-
-.dot.done {
-  background: #93c5fd;
-}
-
-/* ==================== Questionnaire ==================== */
-.questions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 28rpx;
-  margin-bottom: 8rpx;
-}
-
-.question-card {
-  background: #fff;
-  border: 1rpx solid rgba(0, 0, 0, 0.05);
-  border-radius: 24rpx;
-  padding: 32rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.02);
-}
-
-.q-dimension {
-  display: block;
-  font-size: 20rpx;
-  color: #a3a3a3;
-  font-weight: 700;
-  margin-bottom: 8rpx;
-}
-
-.q-text {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #262626;
-  margin-bottom: 24rpx;
-  line-height: 1.4;
-}
-
-.q-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-
-.q-option {
-  padding: 14rpx 24rpx;
-  border-radius: 16rpx;
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #737373;
-  background: #f5f5f5;
-  border: 1rpx solid rgba(0, 0, 0, 0.05);
-  transition: all 0.2s;
-}
-
-.q-option.selected {
-  background: linear-gradient(135deg, #2563eb, #0ea5e9);
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 2rpx 8rpx rgba(37, 99, 235, 0.2);
-}
-
 /* ==================== Profile ==================== */
-.profile-header-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 12rpx;
-}
-
-.skip-link {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #a3a3a3;
-  background: #fff;
-  padding: 10rpx 22rpx;
-  border-radius: 12rpx;
-  border: 1rpx solid rgba(0, 0, 0, 0.06);
-  transition: all 0.15s;
-}
-
-.skip-link:active {
-  background: #f5f5f5;
-  color: #2563eb;
-}
-
 .profile-form {
   display: flex;
   flex-direction: column;
@@ -1473,18 +881,8 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.02);
 }
 
-.age-gender-row {
-  display: flex;
-  gap: 20rpx;
-}
-
-.half-card {
-  flex: 1;
-  margin-bottom: 0;
-}
-
 .gender-card {
-  flex: 1;
+  margin-bottom: 20rpx;
 }
 
 .gender-toggle {
@@ -1524,93 +922,41 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   margin-top: 24rpx;
 }
 
-.avatar-row {
-  display: flex;
-  gap: 16rpx;
-  margin-top: 16rpx;
-}
-
-.avatar-item {
-  width: 120rpx;
-  height: 120rpx;
+.avatar-upload {
+  width: 140rpx;
+  height: 140rpx;
   border-radius: 50%;
   overflow: hidden;
-  position: relative;
-  border: 4rpx solid transparent;
-  transition: all 0.2s;
+  margin-top: 16rpx;
+  border: 2rpx dashed rgba(37, 99, 235, 0.4);
+  background: #f8fafc;
 }
 
-.avatar-item.selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 4rpx rgba(37, 99, 235, 0.15);
-}
-
-.avatar-img {
+.avatar-preview {
   width: 100%;
   height: 100%;
   border-radius: 50%;
 }
 
-.avatar-check {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 36rpx;
-  height: 36rpx;
-  background: #2563eb;
-  border-radius: 50%;
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border: 3rpx solid #fff;
 }
 
-.avatar-check text {
+.avatar-plus {
+  font-size: 44rpx;
+  color: #2563eb;
+  line-height: 1;
+}
+
+.avatar-hint {
   font-size: 20rpx;
-  color: #fff;
-  font-weight: 900;
-}
-
-/* ==================== Emergency Contact ==================== */
-.emergency-card {
-  background: #eff6ff;
-  border: 1rpx solid rgba(37, 99, 235, 0.1);
-  border-radius: 24rpx;
-  padding: 32rpx;
-}
-
-.emergency-header {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  margin-bottom: 12rpx;
-}
-
-.emergency-icon {
-  font-size: 32rpx;
-}
-
-.emergency-title {
-  font-size: 26rpx;
-  font-weight: 800;
-  color: #1e3a5f;
-}
-
-.emergency-desc {
-  display: block;
-  font-size: 22rpx;
-  color: #737373;
-  line-height: 1.6;
-  margin-bottom: 24rpx;
-}
-
-.emergency-inputs {
-  display: flex;
-  gap: 20rpx;
-}
-
-.emergency-inputs .half-card {
-  background: #fff;
+  color: #94a3b8;
+  margin-top: 6rpx;
 }
 
 /* ==================== Submit Button ==================== */
@@ -1621,94 +967,79 @@ const stageLabels = ['', '学籍校验', '偏好问卷', '个人名片']
   font-weight: 900;
 }
 
-/* ==================== Skip Modal ==================== */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
+/* ==================== Picker ==================== */
+.picker-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 999;
-  padding: 40rpx;
+  justify-content: space-between;
+  padding: 4rpx 0;
 }
 
-.modal-card {
-  background: #fff;
-  border-radius: 32rpx;
-  padding: 48rpx 40rpx 36rpx;
-  width: 100%;
-  max-width: 600rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.15);
-  border: 1rpx solid rgba(0, 0, 0, 0.04);
-}
-
-.modal-icon-wrap {
-  width: 100rpx;
-  height: 100rpx;
-  border-radius: 24rpx;
-  background: #fef3c7;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20rpx;
-}
-
-.modal-icon {
-  font-size: 48rpx;
-}
-
-.modal-title {
-  font-size: 34rpx;
-  font-weight: 900;
-  color: #171717;
-  margin-bottom: 12rpx;
-}
-
-.modal-desc {
-  font-size: 26rpx;
-  color: #737373;
-  font-weight: 500;
-  line-height: 1.5;
-  margin-bottom: 36rpx;
-  padding: 0 16rpx;
-}
-
-.modal-actions {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-}
-
-.modal-btn {
-  width: 100%;
-  text-align: center;
-  padding: 24rpx;
-  border-radius: 20rpx;
-  font-size: 26rpx;
+.picker-value {
+  font-size: 28rpx;
   font-weight: 700;
+  color: #262626;
+}
+
+.picker-value.placeholder {
+  color: #c0c0c0;
+  font-weight: 400;
+}
+
+.picker-arrow {
+  font-size: 36rpx;
+  color: #c0c0c0;
+}
+
+/* ==================== Interests step ==================== */
+.stage-interests {
+  background: #fafbfc;
+}
+
+.interests-header {
+  margin-bottom: 36rpx;
+}
+
+.back-btn {
+  margin-bottom: 24rpx;
+}
+
+.back-btn text {
+  font-size: 28rpx;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.interests-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+  margin-bottom: 48rpx;
+}
+
+.interest-chip {
+  padding: 18rpx 30rpx;
+  border-radius: 40rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #737373;
+  background: #fff;
+  border: 1rpx solid rgba(0, 0, 0, 0.08);
   transition: all 0.15s;
 }
 
-.modal-btn:active {
-  transform: scale(0.98);
-}
-
-.skip-btn {
-  background: #f2f2f2;
-  color: #737373;
-}
-
-.confirm-btn {
-  background: #2563eb;
+.interest-chip.selected {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
   color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2rpx 8rpx rgba(37, 99, 235, 0.2);
 }
+
+.skip-tip {
+  text-align: center;
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: #a3a3a3;
+}
+
 </style>

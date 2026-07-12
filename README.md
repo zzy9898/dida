@@ -12,7 +12,7 @@
 | 状态管理 | Pinia |
 | 样式 | SCSS（`rpx` 单位） |
 | 即时通讯 | 腾讯云 IM `@tencentcloud/chat` |
-| 图形验证码 | 阿里云图形验证码 2.0（H5 用 `ct4.js`，微信小程序用原生组件 `captcha4`） |
+| 图形验证码 | 阿里云图形验证码 2.0（微信小程序原生组件 `captcha4`） |
 | 鉴权 | Sa-Token（后端下发 `satoken`，前端持久化注入请求头） |
 | AI 服务 | Google Gemini（`server/`，独立可选，无 Key 时返回 mock） |
 | 开发 / 调试 | HBuilderX + 微信开发者工具 |
@@ -60,8 +60,7 @@ dida/
 1. **`config/index.ts`** —— 分 `dev` / `prod` 两套（按 `process.env.NODE_ENV` 自动选择）：
    - `API_BASE_URL` 后端地址（默认 `http://127.0.0.1:8080`）
    - `IM_SDK_APP_ID` 腾讯云 IM SDKAppID（[IM 控制台](https://console.cloud.tencent.com/im)获取）
-   - `CAPTCHA_ID` 阿里云图形验证码 appId
-   - `CAPTCHA_SDK_URL` H5 端 `ct4.js` 地址（仅 H5 短信登录需要）
+   - `CAPTCHA_ID` 阿里云图形验证码 appId（小程序端原生 `captcha4` 组件使用）
 2. **`manifest.json`**
    - 必须保留 `"vueVersion": "3"`（否则 HBuilderX 退回 Vue2 + webpack 编译，会报一堆错）
    - `mp-weixin.appid`：当前为 `wx7979c77605c59d41`
