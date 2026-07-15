@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="chat-page">
     <!-- ==================== CONVERSATION LIST VIEW ==================== -->
     <template v-if="!store.activeConvId">
@@ -107,7 +107,7 @@
 
             <!-- Sent Message (current user) -->
             <view
-              v-else-if="msg.senderId === store.userProfile?.uid"
+              v-else-if="isOwnMessage(msg)"
               class="msg-sent-wrap"
             >
               <view class="msg-sent">
@@ -329,12 +329,14 @@
         </view>
       </view>
     </view>
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 
 const store = useAppStore()
 
@@ -381,6 +383,12 @@ const activeConversation = computed(() => {
   if (!store.activeConvId) return null
   return store.conversations.find((c) => c.id === store.activeConvId) || null
 })
+
+// Real messages use the backend UID. Seeded demo conversations predate real
+// authentication and mark the local participant with senderName "你".
+function isOwnMessage(msg: { senderId: string; senderName: string }) {
+  return msg.senderId === store.userProfile?.uid || msg.senderName === '你'
+}
 
 // Computed: pending request count
 const pendingRequestCount = computed(() => {
@@ -1390,3 +1398,4 @@ function truncateText(text: string, maxLen: number): string {
   }
 }
 </style>
+

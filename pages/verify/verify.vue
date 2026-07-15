@@ -323,7 +323,9 @@ function handleFormSubmit() {
         <view class="stage-inner">
           <!-- App branding -->
           <view class="branding-row">
-            <view class="brand-icon">滴</view>
+            <view class="brand-icon">
+              <image class="brand-logo" src="/static/dida-logo.jpg" mode="aspectFill" />
+            </view>
             <text class="brand-name">滴答</text>
           </view>
           <text class="brand-desc">实名制高校潮流社交活动平台。在这里呼叫合拍的搭子，轻松拼游。</text>
@@ -656,15 +658,19 @@ function handleFormSubmit() {
 .brand-icon {
   width: 72rpx;
   height: 72rpx;
-  border-radius: 24rpx;
-  background: linear-gradient(135deg, #2563eb, #0ea5e9);
-  color: #fff;
-  font-size: 36rpx;
-  font-weight: 900;
+  border-radius: 18rpx;
+  background: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4rpx 12rpx rgba(37, 99, 235, 0.25);
+  overflow: hidden;
+  box-shadow: 0 4rpx 12rpx rgba(15, 66, 113, 0.18);
+}
+
+.brand-logo {
+  width: 122rpx;
+  height: 122rpx;
+  flex-shrink: 0;
 }
 
 .brand-name {
@@ -679,6 +685,7 @@ function handleFormSubmit() {
   line-height: 1.6;
   margin-bottom: 36rpx;
 }
+
 
 /* ==================== Toggle Rows ==================== */
 .toggle-row {

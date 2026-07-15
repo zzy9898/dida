@@ -216,7 +216,7 @@ export const useAppStore = defineStore('app', () => {
     )
     if (existingReq) {
       if (existingReq.status === 'pending') {
-        uni.showToast({ title: '您的申请已在审核中，请耐心等待！', icon: 'none' })
+        uni.showToast({ title: '您的申请正在等待合拍，请耐心等待！', icon: 'none' })
       } else if (existingReq.status === 'approved') {
         uni.showToast({ title: '您的申请已通过！请前往消息板块查看。', icon: 'none' })
       } else {

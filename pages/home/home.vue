@@ -1,6 +1,7 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 import type { Activity, ClassmateMatch, ThemeEvent } from '@/data/types'
 import { MOCK_MATCHES, MOCK_THEMES } from '@/data/mock'
 
@@ -25,6 +26,7 @@ const reputationTarget = ref<{ name: string; avatar: string; school: string; cre
 
 // ==================== AI Match skip state ====================
 const skippedMatchIds = ref<Set<string>>(new Set())
+const visibleMatchCount = ref<number>(2)
 
 // ==================== Helpers ====================
 const getGreeting = (): string => {
@@ -56,7 +58,7 @@ const getActivityButtonState = (activity: Activity) => {
     (r) => r.activityId === activity.id && r.requesterId === uid
   )
   if (req) {
-    if (req.status === 'pending') return { text: '审核中', disabled: true, type: 'pending' as const }
+    if (req.status === 'pending') return { text: '等待合拍', disabled: true, type: 'pending' as const }
     if (req.status === 'approved') return { text: '已加入', disabled: true, type: 'approved' as const }
     if (req.status === 'rejected') return { text: '重新申请', disabled: false, type: 'rejected' as const }
   }
@@ -95,6 +97,8 @@ const activeMatches = computed(() =>
 )
 
 const allMatchesSkipped = computed(() => activeMatches.value.length === 0)
+const visibleMatches = computed(() => activeMatches.value.slice(0, visibleMatchCount.value))
+const hasMoreMatches = computed(() => visibleMatchCount.value < activeMatches.value.length)
 
 const nearbyActivities = computed(() =>
   store.activityList
@@ -128,6 +132,11 @@ const handleSkipMatch = (uid: string) => {
 
 const handleResetSkips = () => {
   skippedMatchIds.value = new Set()
+  visibleMatchCount.value = 2
+}
+
+const handleLoadMoreMatches = () => {
+  visibleMatchCount.value = Math.min(visibleMatchCount.value + 2, activeMatches.value.length)
 }
 
 // Theme
@@ -172,6 +181,7 @@ const handleInitiateChat = (peer: ClassmateMatch) => {
     name: peer.nickname,
     avatar: peer.avatar,
   })
+  uni.switchTab({ url: '/pages/chat/chat' })
 }
 
 // Reputation
@@ -226,7 +236,6 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
       v-if="searchQuery.trim()"
       class="content-scroll"
       scroll-y
-      :style="{ height: 'calc(100vh - 200rpx)' }"
     >
       <view v-if="searchResults.activities.length === 0 && searchResults.matches.length === 0" class="empty-search">
         <text class="empty-search-text">未找到相关结果，换个关键词试试吧</text>
@@ -277,7 +286,6 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
       v-else
       class="content-scroll"
       scroll-y
-      :style="{ height: 'calc(100vh - 200rpx)' }"
     >
       <!-- ===== 推荐 Tab ===== -->
       <view v-if="currentTab === 0" class="tab-content recommend-tab">
@@ -426,7 +434,7 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
 
         <!-- Match Cards -->
         <view v-else class="ai-match-list">
-          <view v-for="match in activeMatches" :key="match.uid" class="match-card">
+          <view v-for="match in visibleMatches" :key="match.uid" class="match-card">
             <!-- Header -->
             <view class="match-header" @tap="openReputationModal({ name: match.nickname, avatar: match.avatar, school: match.school, creditScore: 75 + Math.floor(Math.random() * 26) })">
               <image class="match-avatar" :src="match.avatar" mode="aspectFill" />
@@ -464,6 +472,14 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
                 <text class="match-chat-text">发起对话</text>
               </view>
             </view>
+          </view>
+
+          <view v-if="hasMoreMatches" class="match-load-more" @tap="handleLoadMoreMatches">
+            <text class="match-load-more-text">查看更多匹配</text>
+            <text class="match-load-more-arrow">↓</text>
+          </view>
+          <view v-else-if="activeMatches.length > 2" class="match-list-finished">
+            <text>已展示全部匹配</text>
           </view>
         </view>
       </view>
@@ -575,8 +591,10 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
       <view class="detail-panel" :class="{ 'panel-visible': showThemeDetail }">
         <view class="detail-panel-header">
           <view class="detail-panel-handle"></view>
+          <view class="detail-panel-back" @tap="closeThemeDetail">
+            <text class="detail-panel-back-icon">&#8592;</text>
+          </view>
           <text class="detail-panel-title">主题详情</text>
-          <view class="detail-panel-close" @tap="closeThemeDetail">&#10005;</view>
         </view>
 
         <scroll-view class="detail-panel-body" scroll-y>
@@ -596,6 +614,16 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
                 <text class="detail-stat-num">{{ selectedTheme.activitiesCount }}</text>
                 <text class="detail-stat-label">关联活动</text>
               </view>
+            </view>
+
+            <view class="theme-detail-highlights">
+              <text class="theme-detail-section-title">主题亮点</text>
+              <view class="theme-detail-chips">
+                <text class="theme-detail-chip">校园同好</text>
+                <text class="theme-detail-chip">系列活动</text>
+                <text class="theme-detail-chip">兴趣交流</text>
+              </view>
+              <text class="theme-detail-tip">加入主题后，你可以第一时间收到相关活动和同好动态，和更多同学一起探索校园生活。</text>
             </view>
 
             <!-- Long-term Participation Checkbox -->
@@ -630,8 +658,10 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
       <view class="detail-panel" :class="{ 'panel-visible': showActivityDetail }">
         <view class="detail-panel-header">
           <view class="detail-panel-handle"></view>
+          <view class="detail-panel-back" @tap="closeActivityDetail">
+            <text class="detail-panel-back-icon">&#8592;</text>
+          </view>
           <text class="detail-panel-title">活动详情</text>
-          <view class="detail-panel-close" @tap="closeActivityDetail">&#10005;</view>
         </view>
 
         <scroll-view class="detail-panel-body" scroll-y>
@@ -756,6 +786,7 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
         </text>
       </view>
     </view>
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
@@ -781,14 +812,17 @@ $radius-lg: 24rpx;
   display: flex;
   flex-direction: column;
   height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
   background-color: $bg-page;
   overflow: hidden;
 }
 
 // ==================== Search Bar ====================
 .search-section {
-  padding: 16rpx 24rpx 12rpx;
+  padding: calc(var(--status-bar-height) + 88rpx) 24rpx 12rpx;
   background: $bg-card;
+  box-sizing: border-box;
 }
 
 .search-bar {
@@ -798,6 +832,8 @@ $radius-lg: 24rpx;
   border-radius: 40rpx;
   padding: 14rpx 24rpx;
   height: 72rpx;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .search-icon {
@@ -873,11 +909,12 @@ $radius-lg: 24rpx;
 // ==================== Content Scroll ====================
 .content-scroll {
   flex: 1;
+  min-height: 0;
   background: $bg-page;
 }
 
 .tab-content {
-  padding-bottom: 40rpx;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
 }
 
 // ==================== Section Headers ====================
@@ -923,6 +960,17 @@ $radius-lg: 24rpx;
   border-radius: $radius-lg;
   padding: 32rpx 28rpx;
   box-shadow: $shadow-lg;
+  box-sizing: border-box;
+}
+
+@media screen and (max-width: 360px) {
+  .search-section { padding-left: 20rpx; padding-right: 20rpx; }
+  .search-input { font-size: 24rpx; }
+  .tab-text { font-size: 27rpx; }
+  .section-title { font-size: 29rpx; }
+  .banner-card { margin-left: 20rpx; margin-right: 20rpx; padding: 28rpx 24rpx; }
+  .banner-greeting { font-size: 32rpx; }
+  .banner-stat-num { font-size: 36rpx; }
 }
 
 .banner-content {
@@ -1923,6 +1971,88 @@ $radius-lg: 24rpx;
   color: $text-secondary;
 }
 
+.match-load-more {
+  height: 88rpx;
+  margin: 8rpx 24rpx 28rpx;
+  border-radius: 44rpx;
+  border: 2rpx solid #bfdbfe;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  box-shadow: 0 4rpx 14rpx rgba(37, 99, 235, 0.08);
+}
+
+.match-load-more-text,
+.match-load-more-arrow {
+  color: $primary;
+  font-size: 27rpx;
+  font-weight: 600;
+}
+
+.match-list-finished {
+  padding: 14rpx 0 32rpx;
+  color: $text-tertiary;
+  font-size: 23rpx;
+  text-align: center;
+}
+
+.detail-panel-back {
+  position: absolute;
+  left: 24rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-panel-back-icon {
+  font-size: 40rpx;
+  line-height: 1;
+  color: $text-primary;
+}
+
+.theme-detail-highlights {
+  margin-top: 28rpx;
+  padding: 24rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+}
+
+.theme-detail-section-title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: $text-primary;
+  margin-bottom: 16rpx;
+}
+
+.theme-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.theme-detail-chip {
+  padding: 8rpx 18rpx;
+  border-radius: 20rpx;
+  color: $primary;
+  background: #dbeafe;
+  font-size: 22rpx;
+}
+
+.theme-detail-tip {
+  display: block;
+  color: $text-secondary;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
 .detail-panel-body {
   flex: 1;
 }
@@ -2388,3 +2518,4 @@ $radius-lg: 24rpx;
   white-space: nowrap;
 }
 </style>
+

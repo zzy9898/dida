@@ -202,12 +202,15 @@
         <text>发布活动</text>
       </view>
     </view>
+
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 import type { Activity } from '@/data/types'
 
 const store = useAppStore()
@@ -361,7 +364,10 @@ $text-secondary: #666666;
 $text-placeholder: #c0c4cc;
 
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background-color: $bg;
   display: flex;
   flex-direction: column;
@@ -374,8 +380,7 @@ $text-placeholder: #c0c4cc;
   padding: 20rpx 32rpx;
   background-color: #ffffff;
   border-bottom: 1rpx solid $border;
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
 }
 
@@ -405,7 +410,10 @@ $text-placeholder: #c0c4cc;
 
 .form-scroll {
   flex: 1;
+  min-height: 0;
+  width: 100%;
   padding: 24rpx 32rpx;
+  box-sizing: border-box;
 }
 
 .section {
@@ -611,15 +619,13 @@ $text-placeholder: #c0c4cc;
 
 /* Bottom Spacer */
 .bottom-spacer {
-  height: 140rpx;
+  height: 32rpx;
 }
 
 /* Bottom Bar */
 .bottom-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   padding: 20rpx 32rpx;
@@ -628,6 +634,13 @@ $text-placeholder: #c0c4cc;
   border-top: 1rpx solid $border;
   gap: 24rpx;
   z-index: 10;
+}
+
+@media screen and (max-width: 360px) {
+  .form-scroll { padding-left: 24rpx; padding-right: 24rpx; }
+  .cover-upload, .cover-preview { height: 280rpx; }
+  .preset-btn { min-width: 138rpx; }
+  .bottom-bar { padding-left: 24rpx; padding-right: 24rpx; gap: 16rpx; }
 }
 
 .btn-cancel {

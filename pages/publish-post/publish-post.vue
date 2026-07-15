@@ -178,12 +178,15 @@
         <text>发布笔记</text>
       </view>
     </view>
+
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 import type { Post } from '@/data/types'
 
 const store = useAppStore()
@@ -226,13 +229,13 @@ const locationIndex = computed(() => {
 })
 
 const visibilityOptions = [
-  { label: '公开', value: 'public', icon: '&#x1F30D;' },
-  { label: '仅校友', value: 'school', icon: '&#x1F393;' },
-  { label: '私密', value: 'private', icon: '&#x1F512;' }
+  { label: '公开', value: 'public', icon: '🌐' },
+  { label: '仅校友', value: 'school', icon: '🎓' },
+  { label: '私密', value: 'private', icon: '🔒' }
 ]
 
 function handleBack() {
-  uni.navigateBack()
+  uni.switchTab({ url: '/pages/forum/forum' })
 }
 
 function handlePickImages() {
@@ -369,7 +372,10 @@ $text-placeholder: #c0c4cc;
 $red: #ef4444;
 
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background-color: $bg;
   display: flex;
   flex-direction: column;
@@ -382,8 +388,7 @@ $red: #ef4444;
   padding: 20rpx 32rpx;
   background-color: #ffffff;
   border-bottom: 1rpx solid $border;
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
 }
 
@@ -413,7 +418,10 @@ $red: #ef4444;
 
 .form-scroll {
   flex: 1;
+  min-height: 0;
+  width: 100%;
   padding: 24rpx 32rpx;
+  box-sizing: border-box;
 }
 
 .section {
@@ -509,10 +517,12 @@ $red: #ef4444;
 .preset-img-row {
   display: flex;
   gap: 16rpx;
+  overflow: hidden;
 }
 
 .preset-img-btn {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -724,15 +734,13 @@ $red: #ef4444;
 
 /* Spacer */
 .bottom-spacer {
-  height: 140rpx;
+  height: 32rpx;
 }
 
 /* Bottom Bar */
 .bottom-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   padding: 20rpx 32rpx;
@@ -741,6 +749,15 @@ $red: #ef4444;
   border-top: 1rpx solid $border;
   gap: 24rpx;
   z-index: 10;
+}
+
+@media screen and (max-width: 360px) {
+  .form-scroll { padding-left: 24rpx; padding-right: 24rpx; }
+  .preset-img-row { gap: 10rpx; }
+  .preset-thumb { height: 112rpx; }
+  .category-grid, .hashtag-row { gap: 12rpx; }
+  .category-btn { padding-left: 22rpx; padding-right: 22rpx; }
+  .bottom-bar { padding-left: 24rpx; padding-right: 24rpx; gap: 16rpx; }
 }
 
 .btn-draft {

@@ -21,6 +21,7 @@
 
     <!-- Post List -->
     <scroll-view scroll-y class="post-list" @scrolltolower="loadMore" :refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onRefresh">
+      <view class="post-list-content">
       <view v-if="filteredPosts.length === 0" class="empty-state">
         <text class="empty-icon">📝</text>
         <text class="empty-text">暂无相关帖子</text>
@@ -113,13 +114,16 @@
       <view class="list-bottom">
         <text class="bottom-text">-- 已经到底啦 --</text>
       </view>
+      </view>
     </scroll-view>
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 import type { Post, Comment } from '@/data/types'
 
 const store = useAppStore()
@@ -289,6 +293,9 @@ function onRefresh() {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background-color: #f5f5f5;
 }
 
@@ -296,6 +303,7 @@ function onRefresh() {
   background-color: #fff;
   padding: 24rpx 32rpx;
   border-bottom: 1px solid #eee;
+  box-sizing: border-box;
 
   .forum-title {
     font-size: 36rpx;
@@ -308,6 +316,7 @@ function onRefresh() {
   background-color: #fff;
   white-space: nowrap;
   border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
 
   .tab-list {
     display: flex;
@@ -340,7 +349,14 @@ function onRefresh() {
 
 .post-list {
   flex: 1;
-  padding: 20rpx 24rpx;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.post-list-content {
+  padding: 20rpx 24rpx calc(180rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
 }
 
 .empty-state {
@@ -373,6 +389,8 @@ function onRefresh() {
   padding: 28rpx;
   margin-bottom: 20rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .post-author-row {
@@ -389,6 +407,7 @@ function onRefresh() {
 
   .author-info {
     flex: 1;
+    min-width: 0;
     margin-left: 18rpx;
 
     .author-name-row {
@@ -399,6 +418,10 @@ function onRefresh() {
         font-size: 28rpx;
         font-weight: 600;
         color: #1a1a1a;
+        max-width: 230rpx;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .verified-badge {
@@ -430,6 +453,21 @@ function onRefresh() {
       color: #d97706;
     }
   }
+}
+
+@media screen and (max-width: 360px) {
+  .forum-header { padding: 20rpx 24rpx; }
+  .forum-header .forum-title { font-size: 32rpx; }
+  .category-tabs .tab-list { padding: 14rpx 20rpx; }
+  .category-tabs .tab-list .tab-item { padding: 10rpx 22rpx; margin-right: 12rpx; }
+  .post-list-content { padding-left: 18rpx; padding-right: 18rpx; }
+  .post-card { padding: 22rpx; }
+  .post-author-row .author-info { margin-left: 14rpx; }
+  .post-author-row .author-info .author-name-row .author-name { font-size: 26rpx; max-width: 190rpx; }
+  .post-author-row .post-category-tag { padding: 5rpx 12rpx; }
+  .post-body .post-title { font-size: 29rpx; }
+  .post-body .post-content { font-size: 25rpx; }
+  .post-actions .action-item { margin-right: 30rpx; }
 }
 
 .post-body {

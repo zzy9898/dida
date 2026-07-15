@@ -6,33 +6,15 @@
     @touchstart="handleTouchStart"
     @touchmove="handleTouchMove"
     @touchend="handleTouchEnd"
+    @touchcancel="handleTouchEnd"
   >
     <!-- Progress Ring -->
-    <svg class="progress-ring" viewBox="0 0 120 120">
-      <circle
-        class="progress-bg"
-        cx="60" cy="60" r="56"
-        fill="none"
-        stroke="rgba(255,255,255,0.25)"
-        stroke-width="6"
-      />
-      <circle
-        class="progress-fill"
-        cx="60" cy="60" r="56"
-        fill="none"
-        stroke="#ffffff"
-        stroke-width="6"
-        stroke-linecap="round"
-        :stroke-dasharray="circumference"
-        :stroke-dashoffset="progressOffset"
-        transform="rotate(-90 60 60)"
-      />
-    </svg>
+    <view class="progress-ring" :class="{ 'progress-ring--active': isPressing }"></view>
 
     <!-- Button Body -->
     <view class="sos-btn" :class="{ 'sos-btn--pressing': isPressing }">
-      <text class="sos-icon">&#x26A0;</text>
-      <text class="sos-text">SOS</text>
+      <text class="sos-icon">&#x1F6E1;</text>
+      <text class="sos-text">{{ isPressing ? remainingSeconds : 'SOS' }}</text>
     </view>
   </view>
 
@@ -42,25 +24,19 @@
   <!-- Confirmation Modal -->
   <view class="modal-mask" v-if="showModal" @tap="handleCancelSOS">
     <view class="modal-card" @tap.stop>
-      <view class="modal-header">
-        <text class="modal-warn-icon">&#x26A0;</text>
-        <text class="modal-title">紧急求助确认</text>
+      <view class="modal-shield">
+        <text class="modal-shield-icon">!</text>
       </view>
+      <text class="modal-title">🚨 即将拨打电话给紧急联系人</text>
+      <text class="modal-description">
+        系统已锁定并获取了您当前的精确定位。即将自动拨打电话呼叫您的紧急联系人：
+        <text class="modal-contact">{{ emergencyName }}（{{ emergencyPhone }}）</text>
+        ，并发送持续 SOS 防卫联动报警和实时地图轨迹！
+      </text>
 
-      <!-- GPS Info -->
-      <view class="modal-info">
-        <view class="info-row">
-          <text class="info-label">当前位置</text>
-          <text class="info-value">{{ gpsInfo }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">紧急联系人</text>
-          <text class="info-value">{{ emergencyName }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">联系电话</text>
-          <text class="info-value info-phone">{{ emergencyPhone }}</text>
-        </view>
+      <view class="location-card">
+        <text class="location-pin">⌾</text>
+        <text class="location-text">{{ gpsInfo }}</text>
       </view>
 
       <!-- Action Buttons -->
@@ -69,7 +45,7 @@
           <text>误触取消</text>
         </view>
         <view class="modal-btn modal-btn--confirm" @tap="handleConfirmSOS">
-          <text>立刻发送</text>
+          <text>➤ 立刻发送</text>
         </view>
       </view>
     </view>
@@ -123,11 +99,7 @@ const touchStartY = ref(0)
 const btnStartX = ref(0)
 const btnStartY = ref(0)
 
-// Progress ring
-const circumference = 2 * Math.PI * 56 // ~351.86
-const progressOffset = computed(() => {
-  return circumference - (pressProgress.value / 100) * circumference
-})
+const remainingSeconds = computed(() => Math.max(1, Math.ceil(3 - pressProgress.value * 0.03)))
 
 // Timer refs
 let pressTimer: ReturnType<typeof setInterval> | null = null
@@ -151,8 +123,8 @@ function initPosition() {
   // Position at bottom-right
   const btnW = 60 // approximate px width for a 120rpx button
   const btnH = 60
-  posX.value = screenWidth.value - btnW - 16
-  posY.value = screenHeight.value - btnH - 120
+  posX.value = screenWidth.value - btnW - 18
+  posY.value = screenHeight.value - btnH - 96
 }
 
 function handleTouchStart(e: any) {
@@ -306,13 +278,14 @@ onMounted(() => {
 $red: #dc2626;
 $red-light: #ef4444;
 $red-dark: #b91c1c;
+$blue: #2563eb;
 
 /* Container */
 .sos-container {
   position: fixed;
   z-index: 999;
-  width: 120rpx;
-  height: 120rpx;
+  width: 128rpx;
+  height: 128rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -323,28 +296,31 @@ $red-dark: #b91c1c;
   position: absolute;
   top: 0;
   left: 0;
-  width: 120rpx;
-  height: 120rpx;
+  width: 128rpx;
+  height: 128rpx;
   pointer-events: none;
+  box-sizing: border-box;
+  border: 6rpx solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+
+  &--active {
+    border-color: #ffffff;
+    animation: sosRingPulse 0.6s ease-in-out infinite alternate;
+  }
 }
 
-.progress-bg,
-.progress-fill {
-  transform-origin: center;
-}
-
-.progress-fill {
-  transition: stroke-dashoffset 0.05s linear;
-  opacity: 0.9;
+@keyframes sosRingPulse {
+  from { transform: scale(0.96); opacity: 0.55; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 /* Button */
 .sos-btn {
-  width: 100rpx;
-  height: 100rpx;
+  width: 108rpx;
+  height: 108rpx;
   border-radius: 50%;
   background: linear-gradient(135deg, $red-light, $red);
-  box-shadow: 0 8rpx 24rpx rgba(220, 38, 38, 0.45);
+  box-shadow: 0 0 0 18rpx rgba(239, 68, 68, 0.08), 0 10rpx 28rpx rgba(220, 38, 38, 0.5);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -358,13 +334,13 @@ $red-dark: #b91c1c;
 }
 
 .sos-icon {
-  font-size: 28rpx;
+  font-size: 30rpx;
   color: #ffffff;
   line-height: 1;
 }
 
 .sos-text {
-  font-size: 24rpx;
+  font-size: 20rpx;
   color: #ffffff;
   font-weight: 800;
   letter-spacing: 2rpx;
@@ -403,23 +379,29 @@ $red-dark: #b91c1c;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.55);
+  background-color: rgba(3, 7, 18, 0.68);
+  backdrop-filter: blur(8rpx);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 60rpx;
+  padding: 48rpx;
+  box-sizing: border-box;
 }
 
 .modal-card {
   width: 100%;
-  max-width: 600rpx;
-  background-color: #ffffff;
-  border-radius: 24rpx;
-  padding: 48rpx 40rpx;
+  max-width: 620rpx;
+  box-sizing: border-box;
+  background: linear-gradient(160deg, #100d0f 0%, #070708 100%);
+  border: 2rpx solid rgba(239, 32, 48, 0.7);
+  border-radius: 38rpx;
+  padding: 38rpx 36rpx 36rpx;
   display: flex;
   flex-direction: column;
-  gap: 32rpx;
+  align-items: center;
+  gap: 26rpx;
+  box-shadow: 0 28rpx 80rpx rgba(0, 0, 0, 0.48), inset 0 0 48rpx rgba(239, 32, 48, 0.05);
 
   &--success {
     align-items: center;
@@ -427,61 +409,76 @@ $red-dark: #b91c1c;
   }
 }
 
-.modal-header {
+.modal-shield {
+  width: 78rpx;
+  height: 78rpx;
+  border-radius: 50%;
+  border: 3rpx solid #ef233c;
+  background: rgba(239, 35, 60, 0.12);
   display: flex;
   align-items: center;
-  gap: 16rpx;
   justify-content: center;
 }
 
-.modal-warn-icon {
-  font-size: 48rpx;
-  color: $red;
+.modal-shield-icon {
+  width: 34rpx;
+  height: 42rpx;
+  border: 3rpx solid #ef233c;
+  border-radius: 9rpx 9rpx 14rpx 14rpx;
+  color: #ef233c;
+  font-size: 25rpx;
+  font-weight: 900;
+  text-align: center;
+  line-height: 38rpx;
 }
 
 .modal-title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: $red;
+  font-size: 29rpx;
+  font-weight: 800;
+  color: #ff3150;
+  text-align: center;
 }
 
-/* Info rows */
-.modal-info {
-  background-color: #fef2f2;
-  border-radius: 16rpx;
-  padding: 24rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 20rpx;
+.modal-description {
+  font-size: 23rpx;
+  line-height: 1.75;
+  color: #a8a8ad;
+  text-align: center;
 }
 
-.info-row {
+.modal-contact {
+  color: #f4f4f5;
+  font-weight: 800;
+}
+
+.location-card {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 76rpx;
+  padding: 18rpx 24rpx;
+  border-radius: 24rpx;
+  background: #17171a;
+  border: 1rpx solid #27272a;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 16rpx;
 }
 
-.info-label {
-  font-size: 26rpx;
-  color: #666666;
+.location-pin {
+  color: #ff3150;
+  font-size: 30rpx;
 }
 
-.info-value {
-  font-size: 26rpx;
-  color: #333333;
-  font-weight: 600;
-  max-width: 360rpx;
-  text-align: right;
+.location-text {
+  flex: 1;
+  color: #c7c7cc;
+  font-size: 22rpx;
   word-break: break-all;
-}
-
-.info-phone {
-  color: $blue;
-  text-decoration: underline;
 }
 
 /* Modal actions */
 .modal-actions {
+  width: 100%;
   display: flex;
   gap: 24rpx;
 }
@@ -489,21 +486,21 @@ $red-dark: #b91c1c;
 .modal-btn {
   flex: 1;
   height: 88rpx;
-  border-radius: 44rpx;
+  border-radius: 20rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30rpx;
+  font-size: 27rpx;
   font-weight: 600;
 
   &--cancel {
-    background-color: #f5f5f5;
-    color: #666666;
-    border: 2rpx solid #e5e7eb;
+    background-color: #151518;
+    color: #d4d4d8;
+    border: 2rpx solid #34343a;
   }
 
   &--confirm {
-    background-color: $red;
+    background: linear-gradient(135deg, #ff1738, #e80020);
     color: #ffffff;
     box-shadow: 0 4rpx 16rpx rgba(220, 38, 38, 0.3);
   }
@@ -513,6 +510,13 @@ $red-dark: #b91c1c;
     color: #ffffff;
     width: 100%;
   }
+}
+
+@media screen and (max-width: 360px) {
+  .modal-mask { padding: 36rpx; }
+  .modal-card { padding-left: 28rpx; padding-right: 28rpx; }
+  .modal-actions { gap: 16rpx; }
+  .modal-btn { font-size: 24rpx; }
 }
 
 /* Success state */

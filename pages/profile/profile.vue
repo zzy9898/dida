@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <view class="profile-page">
     <!-- Header -->
     <view class="profile-header">
@@ -201,6 +201,15 @@
             <text class="sidebar-item-text">草稿箱</text>
             <text class="sidebar-item-value">{{ store.myDraftPosts.length }} 篇</text>
           </view>
+          <view class="sidebar-item" @click="openService('浏览痕迹')">
+            <text class="sidebar-item-text">浏览痕迹</text><text class="sidebar-item-arrow">›</text>
+          </view>
+          <view class="sidebar-item" @click="openService('出行记录')">
+            <text class="sidebar-item-text">出行记录</text><text class="sidebar-item-arrow">›</text>
+          </view>
+          <view class="sidebar-item" @click="openService('荣誉体系')">
+            <text class="sidebar-item-text">荣誉体系</text><text class="sidebar-item-arrow">›</text>
+          </view>
         </view>
 
         <view class="sidebar-divider" />
@@ -214,11 +223,11 @@
             <text class="sidebar-item-text">社区规范</text>
             <text class="sidebar-item-arrow">›</text>
           </view>
-          <view class="sidebar-item">
+          <view class="sidebar-item" @click="openService('隐私政策')">
             <text class="sidebar-item-text">隐私政策</text>
             <text class="sidebar-item-arrow">›</text>
           </view>
-          <view class="sidebar-item">
+          <view class="sidebar-item" @click="showSidebar = false; showSettingsModal = true">
             <text class="sidebar-item-text">通用设置</text>
             <text class="sidebar-item-arrow">›</text>
           </view>
@@ -320,9 +329,11 @@
           <text class="support-item">微信客服：dida_helper</text>
           <text class="support-item">工作时间：工作日 9:00 - 21:00</text>
         </view>
+        <textarea v-model="feedbackText" class="review-textarea" placeholder="也可以直接填写问题或建议..." :maxlength="300" />
         <view class="modal-actions modal-actions-center">
-          <view class="modal-btn cancel-btn" @click="showCustomerSupportModal = false">
-            <text class="modal-btn-text">关闭</text>
+          <view class="modal-btn cancel-btn" @click="showCustomerSupportModal = false"><text class="modal-btn-text">关闭</text></view>
+          <view class="modal-btn confirm-btn" @click="submitFeedback">
+            <text class="modal-btn-text-white">提交反馈</text>
           </view>
         </view>
       </view>
@@ -432,12 +443,56 @@
         </view>
       </view>
     </view>
+
+    <view v-if="servicePanel" class="modal-overlay" @click="servicePanel = ''">
+      <view class="modal-card" @click.stop>
+        <text class="modal-title">{{ servicePanel }}</text>
+        <view v-if="servicePanel === '浏览痕迹'" class="support-info">
+          <text class="support-item">今天 · 查看了「周末咖啡手冲交流」</text>
+          <text class="support-item">昨天 · 浏览了校园夜跑活动</text>
+          <text class="support-item">07-10 · 查看了主题周「夏夜电影」</text>
+        </view>
+        <view v-else-if="servicePanel === '出行记录'" class="support-info">
+          <text class="support-item">已完成 3 次搭子活动</text>
+          <text class="support-item">累计守约 3 次 · 爽约 0 次</text>
+          <text class="support-item">最近出行：中心校区咖啡碰面</text>
+        </view>
+        <view v-else-if="servicePanel === '荣誉体系'" class="support-info">
+          <text class="support-item">🏅 守时搭子 · 连续守约 3 次</text>
+          <text class="support-item">🌟 校园探索者 · 参与 3 类活动</text>
+          <text class="support-item">🔒 安全先锋 · 已设置紧急联系人</text>
+        </view>
+        <view v-else class="support-info">
+          <text class="support-item">滴答仅收集完成身份认证、活动匹配和安全保障所必需的信息。</text>
+          <text class="support-item">未经你的授权，我们不会向无关第三方共享个人资料。</text>
+          <text class="support-item">你可以在设置中申请注销账户和删除个人信息。</text>
+        </view>
+        <view class="modal-actions modal-actions-center"><view class="modal-btn cancel-btn" @click="servicePanel = ''"><text class="modal-btn-text">关闭</text></view></view>
+      </view>
+    </view>
+
+    <view v-if="showSettingsModal" class="modal-overlay" @click="showSettingsModal = false">
+      <view class="modal-card" @click.stop>
+        <text class="modal-title">通用设置</text>
+        <view class="support-info">
+          <text class="support-item">消息通知　已开启</text>
+          <text class="support-item">仅 Wi-Fi 自动加载图片　已关闭</text>
+          <text class="support-item">当前版本　v1.0.0</text>
+        </view>
+        <view class="modal-actions">
+          <view class="modal-btn cancel-btn" @click="showSettingsModal = false"><text class="modal-btn-text">取消</text></view>
+          <view class="modal-btn confirm-btn" @click="logoutAccount"><text class="modal-btn-text-white">退出登录</text></view>
+        </view>
+      </view>
+    </view>
+    <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import GlobalSOS from '@/components/GlobalSOS.vue'
 import { MOCK_THEMES } from '@/data/mock'
 import type { UserProfile, Activity, Post } from '@/data/types'
 
@@ -463,6 +518,26 @@ const showCustomerSupportModal = ref<boolean>(false)
 const showGuidelinesModal = ref<boolean>(false)
 const showDraftsModal = ref<boolean>(false)
 const showRatingModal = ref<boolean>(false)
+const showSettingsModal = ref<boolean>(false)
+const servicePanel = ref<string>('')
+const feedbackText = ref<string>('')
+
+function openService(name: string) {
+  showSidebar.value = false
+  servicePanel.value = name
+}
+
+async function logoutAccount() {
+  await store.logout()
+  uni.reLaunch({ url: '/pages/verify/verify' })
+}
+
+function submitFeedback() {
+  if (!feedbackText.value.trim()) return uni.showToast({ title: '请填写反馈内容', icon: 'none' })
+  feedbackText.value = ''
+  showCustomerSupportModal.value = false
+  uni.showToast({ title: '反馈已提交', icon: 'success' })
+}
 
 // Edit profile form
 const editForm = reactive({
@@ -1539,3 +1614,4 @@ function useMockDraft(md: { title: string; content: string }) {
   }
 }
 </style>
+
