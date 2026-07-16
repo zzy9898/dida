@@ -70,15 +70,18 @@
       <!-- Category -->
       <view class="section">
         <text class="section-label">选择分类</text>
+        <view v-if="categories.length === 0" class="category-empty">
+          <text class="category-empty-text">分类加载中...</text>
+        </view>
         <view class="category-grid">
           <view
             class="category-btn"
-            :class="{ 'category-btn--active': form.category === cat.value }"
+            :class="{ 'category-btn--active': form.categoryId === cat.id }"
             v-for="cat in categories"
-            :key="cat.value"
-            @tap="form.category = cat.value"
+            :key="cat.id"
+            @tap="form.categoryId = cat.id"
           >
-            <text>{{ cat.label }}</text>
+            <text>{{ cat.name }}</text>
           </view>
         </view>
       </view>
@@ -148,34 +151,14 @@
         </picker>
       </view>
 
-      <!-- Visibility -->
-      <view class="section">
-        <text class="section-label">可见范围</text>
-        <view class="visibility-row">
-          <view
-            class="visibility-btn"
-            :class="{ 'visibility-btn--active': form.visibility === opt.value }"
-            v-for="opt in visibilityOptions"
-            :key="opt.value"
-            @tap="form.visibility = opt.value"
-          >
-            <text class="visibility-emoji">{{ opt.icon }}</text>
-            <text class="visibility-label">{{ opt.label }}</text>
-          </view>
-        </view>
-      </view>
-
       <!-- Spacer -->
       <view class="bottom-spacer"></view>
     </scroll-view>
 
     <!-- Bottom Buttons -->
     <view class="bottom-bar">
-      <view class="btn-draft" @tap="handleSaveDraft">
-        <text>存草稿</text>
-      </view>
-      <view class="btn-publish" @tap="handlePublish">
-        <text>发布笔记</text>
+      <view class="btn-publish" :class="{ 'btn-publish--loading': publishing }" @tap="handlePublish">
+        <text>{{ publishing ? '发布中...' : '发布笔记' }}</text>
       </view>
     </view>
 
@@ -185,40 +168,45 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
 import GlobalSOS from '@/components/GlobalSOS.vue'
-import type { Post } from '@/data/types'
+import { uploadPostMedia } from '@/utils/upload'
+import { RequestError } from '@/utils/request'
+import type { CreatePostParam } from '@/data/types'
 
 const store = useAppStore()
 
 const images = ref<string[]>([])
 const isRecording = ref(false)
+const publishing = ref(false)
 
 interface PublishPostForm {
   title: string
-  category: string
+  categoryId: number | null
   content: string
   location: string
-  visibility: string
 }
 
 const form = reactive<PublishPostForm>({
   title: '',
-  category: '暂不分类',
+  categoryId: null,
   content: '',
-  location: '',
-  visibility: 'public'
+  location: ''
 })
 
-const categories = [
-  { label: '暂不分类', value: '暂不分类' },
-  { label: '求助吐槽', value: '求助吐槽' },
-  { label: '美味探店', value: '美味探店' },
-  { label: '运动打卡', value: '运动打卡' },
-  { label: '自学研习', value: '自学研习' },
-  { label: '桌游社交', value: '桌游社交' },
-  { label: '摇滚民谣', value: '摇滚民谣' }
-]
+// 动态分类（后端 §4.1）
+const categories = computed(() => store.postCategories)
+
+onShow(async () => {
+  try {
+    const list = await store.loadCategories()
+    // 默认选中第一个分类
+    if (form.categoryId === null && list.length) form.categoryId = list[0].id
+  } catch {
+    /* request 层已提示 */
+  }
+})
 
 const hashtags = ['#跑步打卡', '#操场晚风', '#期末加油', '#自习室', '#猫咖日记', '#食堂干饭', '#校园街拍', '#今日穿搭']
 
@@ -227,12 +215,6 @@ const locationIndex = computed(() => {
   const idx = locationOptions.indexOf(form.location)
   return idx >= 0 ? idx : 0
 })
-
-const visibilityOptions = [
-  { label: '公开', value: 'public', icon: '🌐' },
-  { label: '仅校友', value: 'school', icon: '🎓' },
-  { label: '私密', value: 'private', icon: '🔒' }
-]
 
 function handleBack() {
   uni.switchTab({ url: '/pages/forum/forum' })
@@ -296,69 +278,52 @@ function handleVoiceRecord() {
 }
 
 function validateForm(): string | null {
+  if (!store.userProfile) return '请先登录'
   if (!form.title.trim()) return '请填写帖子标题'
+  if (form.categoryId === null) return '请选择帖子分类'
   if (!form.content.trim()) return '请填写正文内容'
-  if (images.value.length === 0) return '请至少添加一张图片'
   return null
 }
 
-function buildPost(isDraft: boolean): Post | null {
-  if (!store.userProfile) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    return null
-  }
-
-  const category = form.category === '暂不分类' ? undefined : form.category
-
-  return {
-    id: store.genId('post_'),
-    title: form.title.trim(),
-    content: form.content.trim(),
-    images: [...images.value],
-    school: store.userProfile.school,
-    authorName: store.userProfile.nickname,
-    authorAvatar: store.userProfile.avatar,
-    authorVerified: true,
-    likes: 0,
-    likedBy: [],
-    comments: [],
-    createdAt: isDraft ? '草稿' : new Date().toLocaleString('zh-CN'),
-    category,
-    isDraft
-  }
-}
-
-function handleSaveDraft() {
-  if (!form.title.trim() && !form.content.trim()) {
-    uni.showToast({ title: '空内容无法保存', icon: 'none' })
-    return
-  }
-
-  const post = buildPost(true)
-  if (!post) return
-
-  store.publishPost(post)
-  uni.showToast({ title: '已保存草稿', icon: 'success' })
-  setTimeout(() => {
-    uni.switchTab({ url: '/pages/profile/profile' })
-  }, 800)
-}
-
-function handlePublish() {
+async function handlePublish() {
+  if (publishing.value) return
   const error = validateForm()
   if (error) {
     uni.showToast({ title: error, icon: 'none' })
     return
   }
 
-  const post = buildPost(false)
-  if (!post) return
+  publishing.value = true
+  uni.showLoading({ title: '发布中...', mask: true })
+  try {
+    // 本地图上传 OSS，预设/远程图透传；无图也可发布（media 选填）
+    const media = images.value.length ? await uploadPostMedia(images.value) : undefined
 
-  store.publishPost(post)
-  uni.showToast({ title: '发布成功！', icon: 'success' })
-  setTimeout(() => {
-    uni.switchTab({ url: '/pages/forum/forum' })
-  }, 800)
+    const param: CreatePostParam = {
+      categoryId: form.categoryId as number,
+      title: form.title.trim(),
+      content: form.content.trim(),
+      media,
+      locationName: form.location || undefined,
+    }
+
+    await store.publishPost(param)
+    uni.hideLoading()
+    uni.showToast({ title: '发布成功！', icon: 'success' })
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/forum/forum' })
+    }, 800)
+  } catch (e) {
+    uni.hideLoading()
+    const code = (e as RequestError).code
+    if (code === 403) {
+      uni.showToast({ title: '发帖需先完成实名与学籍认证', icon: 'none', duration: 2000 })
+    } else {
+      uni.showToast({ title: (e as Error).message || '发布失败，请稍后重试', icon: 'none' })
+    }
+  } finally {
+    publishing.value = false
+  }
 }
 </script>
 
@@ -699,39 +664,6 @@ $red: #ef4444;
   color: $text-placeholder;
 }
 
-/* Visibility */
-.visibility-row {
-  display: flex;
-  gap: 16rpx;
-}
-
-.visibility-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24rpx 16rpx;
-  background-color: #ffffff;
-  border: 2rpx solid $border;
-  border-radius: 16rpx;
-  gap: 8rpx;
-
-  &--active {
-    border-color: $blue;
-    background-color: #eff6ff;
-  }
-}
-
-.visibility-emoji {
-  font-size: 36rpx;
-}
-
-.visibility-label {
-  font-size: 24rpx;
-  color: $text-secondary;
-}
-
 /* Spacer */
 .bottom-spacer {
   height: 32rpx;
@@ -760,21 +692,8 @@ $red: #ef4444;
   .bottom-bar { padding-left: 24rpx; padding-right: 24rpx; gap: 16rpx; }
 }
 
-.btn-draft {
-  flex: 1;
-  height: 88rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: $bg;
-  border: 2rpx solid $border;
-  border-radius: 44rpx;
-  font-size: 30rpx;
-  color: $text-secondary;
-}
-
 .btn-publish {
-  flex: 2;
+  flex: 1;
   height: 88rpx;
   display: flex;
   align-items: center;
@@ -784,5 +703,18 @@ $red: #ef4444;
   font-size: 30rpx;
   color: #ffffff;
   font-weight: 600;
+
+  &--loading {
+    opacity: 0.6;
+  }
+}
+
+.category-empty {
+  padding: 8rpx 0 16rpx;
+
+  .category-empty-text {
+    font-size: 24rpx;
+    color: $text-placeholder;
+  }
 }
 </style>

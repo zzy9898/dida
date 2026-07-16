@@ -18,6 +18,16 @@ export interface RequestOptions {
   header?: Record<string, string>
 }
 
+/** 业务失败时抛出的错误，携带后端 Result.code，便于调用方按 code 分支（如 403 引导认证） */
+export class RequestError extends Error {
+  code?: number
+  constructor(message: string, code?: number) {
+    super(message)
+    this.name = 'RequestError'
+    this.code = code
+  }
+}
+
 /** 清除本地登录态（被 401 与 logout 复用） */
 export function clearAuthStorage() {
   Object.values(STORAGE_KEYS).forEach((k) => uni.removeStorageSync(k))
@@ -92,12 +102,12 @@ export function request<T = any>(options: RequestOptions): Promise<T> {
         if (body.code === 401) {
           if (showError) uni.showToast({ title: friendlyMessage(401), icon: 'none' })
           handleUnauthorized()
-          reject(new Error(body.message || '未登录'))
+          reject(new RequestError(body.message || '未登录', 401))
           return
         }
         // 业务失败：404（参数/登录失败）/403/500 等
         if (showError) uni.showToast({ title: friendlyMessage(body.code, body.message), icon: 'none' })
-        reject(new Error(body.message || `业务错误 ${body.code}`))
+        reject(new RequestError(body.message || `业务错误 ${body.code}`, body.code))
       },
       fail: (err) => {
         if (showError) uni.showToast({ title: '网络请求失败', icon: 'none' })

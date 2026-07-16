@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
-  UserProfile, Activity, Post, Conversation, CreditLog, ChatMessage, GroupJoinRequest,
+  UserProfile, Activity, Conversation, CreditLog, ChatMessage, GroupJoinRequest,
   UserLoginVO, UserInfoVO, RegisterParam, GenderType,
+  ForumCategoryVO, CreatePostParam,
 } from '@/data/types'
-import { MOCK_ACTIVITIES, MOCK_CONVERSATIONS, MOCK_POSTS, MOCK_CREDIT_LOGS } from '@/data/mock'
+import { MOCK_ACTIVITIES, MOCK_CONVERSATIONS, MOCK_CREDIT_LOGS } from '@/data/mock'
 import * as userApi from '@/api/user'
+import * as postApi from '@/api/post'
 import { imLogin, imLogout } from '@/utils/im'
 import { clearAuthStorage } from '@/utils/request'
 import { STORAGE_KEYS } from '@/config'
@@ -33,6 +35,8 @@ function mapVoToProfile(vo: UserLoginVO | UserInfoVO): UserProfile {
     emergencyContactName: '',
     emergencyContactPhone: '',
     creditScore: typeof vo.reputationScore === 'number' ? vo.reputationScore : 100,
+    isIdVerified: !!vo.isIdVerified,
+    isSchoolVerified: !!vo.isSchoolVerified,
   }
 }
 
@@ -44,9 +48,11 @@ export const useAppStore = defineStore('app', () => {
 
   // Data lists
   const activityList = ref<Activity[]>([...MOCK_ACTIVITIES])
-  const postList = ref<Post[]>([...MOCK_POSTS])
   const conversations = ref<Conversation[]>([...MOCK_CONVERSATIONS])
   const creditLogs = ref<CreditLog[]>([...MOCK_CREDIT_LOGS])
+
+  // 帖子分类缓存（论坛 & 发帖共用，见 docs/API.md §4.1）
+  const postCategories = ref<ForumCategoryVO[]>([])
 
   // Group join requests
   const groupJoinRequests = ref<GroupJoinRequest[]>([
@@ -167,6 +173,24 @@ export const useAppStore = defineStore('app', () => {
       return true
     } catch {
       clearAuthStorage()
+      return false
+    }
+  }
+
+  /**
+   * 重新拉取当前登录用户信息并刷新 profile（如实名/学籍认证状态变更后）。
+   * 未登录时直接跳过；失败静默（request 层已处理 401）。
+   * @returns 是否刷新成功
+   */
+  async function refreshUserInfo(): Promise<boolean> {
+    if (!satoken.value && !uni.getStorageSync(STORAGE_KEYS.TOKEN)) return false
+    try {
+      const info = await userApi.getUserInfo()
+      const profile = mapVoToProfile(info)
+      setUserProfile(profile)
+      uni.setStorageSync(STORAGE_KEYS.PROFILE, profile)
+      return true
+    } catch {
       return false
     }
   }
@@ -385,15 +409,22 @@ export const useAppStore = defineStore('app', () => {
     addCreditLog(3, `发起了拼团活动："${act.title.substring(0, 10)}..."`)
   }
 
-  function publishPost(post: Post) {
-    postList.value = [post, ...postList.value]
-    if (!post.isDraft) {
-      addCreditLog(2, `发布图文帖子："${post.title.substring(0, 12)}"`)
-    }
+  /** 加载帖子分类（带缓存；force 时强制刷新） */
+  async function loadCategories(force = false): Promise<ForumCategoryVO[]> {
+    if (!force && postCategories.value.length) return postCategories.value
+    const list = await postApi.getCategories()
+    postCategories.value = list
+    return list
   }
 
-  function updatePostList(list: Post[]) {
-    postList.value = list
+  /**
+   * 发帖：调后端 createPost，成功后加信誉分，返回新帖 ID。
+   * 失败（含无 `post` 权限的 403）向上抛，由页面 catch 引导认证。
+   */
+  async function publishPost(param: CreatePostParam): Promise<number> {
+    const postId = await postApi.createPost(param)
+    addCreditLog(2, `发布图文帖子："${param.title.substring(0, 12)}"`)
+    return postId
   }
 
   function updateActivityList(list: Activity[]) {
@@ -413,34 +444,22 @@ export const useAppStore = defineStore('app', () => {
       a.members.includes(userProfile.value?.uid || '') && a.creatorUid !== userProfile.value?.uid
     )
   )
-  const myPublishedPosts = computed(() =>
-    postList.value.filter((p) => p.authorName === userProfile.value?.nickname && !p.isDraft)
-  )
-  const myDraftPosts = computed(() =>
-    postList.value.filter((p) => p.authorName === userProfile.value?.nickname && p.isDraft)
-  )
-  const myLikedPosts = computed(() =>
-    postList.value.filter((p) =>
-      p.likedBy?.includes(userProfile.value?.uid || '') ||
-      p.likedBy?.includes(userProfile.value?.nickname || '')
-    )
-  )
 
   return {
     userProfile, activeTab, prevTab,
-    activityList, postList, conversations, creditLogs,
+    activityList, conversations, creditLogs,
+    postCategories,
     groupJoinRequests,
     registeredThemes, longtermThemes,
     activeConvId, genId,
     satoken, imUserId, userSig,
     setUserProfile, setActiveTab, addCreditLog,
-    loginWithPassword, loginWithSms, registerUser, logout, restoreSession,
+    loginWithPassword, loginWithSms, registerUser, logout, restoreSession, refreshUserInfo,
     handleJoinActivity, handleProcessJoinRequest,
     handleInitiateChat, handleDisconnectConversation,
     handleSendMessage,
-    publishActivity, publishPost,
-    updatePostList, updateActivityList, updateProfile,
+    publishActivity, publishPost, loadCategories,
+    updateActivityList, updateProfile,
     myCreatedActivities, myJoinedActivities,
-    myPublishedPosts, myDraftPosts, myLikedPosts
   }
 })

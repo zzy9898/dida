@@ -26,7 +26,10 @@
           <view class="profile-info">
             <view class="nickname-row">
               <text class="nickname">{{ store.userProfile?.nickname || '未登录' }}</text>
-              <text class="verified-mark">已认证</text>
+              <text
+                :class="['verified-mark', { unverified: !verifyStatus.verified }]"
+                @click="!verifyStatus.verified && goCertify()"
+              >{{ verifyStatus.label }}</text>
             </view>
             <text class="dida-id">DIDA ID: {{ store.userProfile?.uid || '---' }}</text>
             <text class="school-name">{{ store.userProfile?.school || '' }}</text>
@@ -35,6 +38,14 @@
         <!-- Interest Tags -->
         <view v-if="store.userProfile?.interests?.length" class="interest-tags">
           <text v-for="tag in store.userProfile.interests" :key="tag" class="interest-tag">{{ tag }}</text>
+        </view>
+        <!-- 认证入口（仅未完成认证时显示） -->
+        <view v-if="store.userProfile && !verifyStatus.verified" class="certify-entry" @click="goCertify">
+          <view class="certify-entry-left">
+            <text class="certify-entry-title">{{ verifyStatus.label }}</text>
+            <text class="certify-entry-desc">完成实名与学籍认证，解锁发帖、加好友</text>
+          </view>
+          <text class="certify-entry-arrow">去认证 ›</text>
         </view>
       </view>
 
@@ -99,29 +110,29 @@
 
       <!-- Posts Tab -->
       <view v-if="profileSubTab === 'posts'" class="tab-content">
-        <view v-if="store.myPublishedPosts.length === 0" class="tab-empty">
+        <view v-if="myPosts.length === 0" class="tab-empty">
           <text class="tab-empty-text">暂未发布帖子</text>
         </view>
-        <view v-for="post in store.myPublishedPosts" :key="post.id" class="post-card-sm">
+        <view v-for="post in myPosts" :key="post.id" class="post-card-sm" @click="goDetail(post.id)">
           <view class="post-sm-top">
             <text class="post-sm-title">{{ post.title }}</text>
             <view class="post-sm-tag">
-              <text class="post-sm-tag-text">{{ post.category || '综合' }}</text>
+              <text class="post-sm-tag-text">{{ post.categoryName || '综合' }}</text>
             </view>
           </view>
           <text class="post-sm-content">{{ post.content.substring(0, 80) }}{{ post.content.length > 80 ? '...' : '' }}</text>
-          <view v-if="post.images?.length" class="post-sm-images">
+          <view v-if="post.media?.length" class="post-sm-images">
             <image
-              v-for="(img, idx) in post.images.slice(0, 3)"
+              v-for="(m, idx) in post.media.slice(0, 3)"
               :key="idx"
-              :src="img"
+              :src="m.url"
               class="post-sm-img"
               mode="aspectFill"
             />
           </view>
           <view class="post-sm-footer">
-            <text class="post-sm-time">{{ post.createdAt }}</text>
-            <text class="post-sm-likes">❤️ {{ post.likes }} · 💬 {{ post.comments.length }}</text>
+            <text class="post-sm-time">{{ formatTime(post.createTime) }}</text>
+            <text class="post-sm-likes">❤️ {{ post.likeCount }} · 💬 {{ post.commentCount }}</text>
           </view>
         </view>
       </view>
@@ -148,18 +159,18 @@
         </view>
       </view>
 
-      <!-- Liked Tab -->
-      <view v-if="profileSubTab === 'liked'" class="tab-content">
-        <view v-if="store.myLikedPosts.length === 0" class="tab-empty">
-          <text class="tab-empty-text">暂无点赞的帖子</text>
+      <!-- Favorites Tab -->
+      <view v-if="profileSubTab === 'favorites'" class="tab-content">
+        <view v-if="myFavorites.length === 0" class="tab-empty">
+          <text class="tab-empty-text">暂无收藏的帖子</text>
         </view>
-        <view v-for="post in store.myLikedPosts" :key="post.id" class="liked-card">
-          <image :src="post.authorAvatar" class="liked-avatar" mode="aspectFill" />
+        <view v-for="post in myFavorites" :key="post.id" class="liked-card" @click="goDetail(post.id)">
+          <image :src="post.userImageUrl" class="liked-avatar" mode="aspectFill" />
           <view class="liked-info">
             <text class="liked-title">{{ post.title }}</text>
-            <text class="liked-author">{{ post.authorName }}</text>
+            <text class="liked-author">{{ post.userNickname }}</text>
           </view>
-          <text class="liked-heart">❤️</text>
+          <text class="liked-heart">⭐</text>
         </view>
       </view>
 
@@ -196,10 +207,6 @@
               color="#2563eb"
               @change="toggleHideSOS"
             />
-          </view>
-          <view class="sidebar-item" @click="showSidebar = false; showDraftsModal = true">
-            <text class="sidebar-item-text">草稿箱</text>
-            <text class="sidebar-item-value">{{ store.myDraftPosts.length }} 篇</text>
           </view>
           <view class="sidebar-item" @click="openService('浏览痕迹')">
             <text class="sidebar-item-text">浏览痕迹</text><text class="sidebar-item-arrow">›</text>
@@ -366,54 +373,6 @@
       </view>
     </view>
 
-    <!-- Drafts Box Modal -->
-    <view v-if="showDraftsModal" class="modal-overlay" @click="showDraftsModal = false">
-      <view class="modal-card modal-card-wide" @click.stop>
-        <text class="modal-title">草稿箱</text>
-        <scroll-view scroll-y class="drafts-list">
-          <!-- Real Drafts -->
-          <view v-if="store.myDraftPosts.length > 0">
-            <text class="draft-section-label">我的草稿</text>
-            <view v-for="draft in store.myDraftPosts" :key="draft.id" class="draft-card">
-              <view class="draft-info">
-                <text class="draft-title">{{ draft.title }}</text>
-                <text class="draft-preview">{{ draft.content.substring(0, 60) }}...</text>
-              </view>
-              <view class="draft-actions">
-                <view class="draft-btn delete-btn" @click="deleteDraft(draft.id)">
-                  <text class="draft-btn-delete">删除</text>
-                </view>
-                <view class="draft-btn publish-btn" @click="publishDraft(draft.id)">
-                  <text class="draft-btn-publish">发布</text>
-                </view>
-              </view>
-            </view>
-          </view>
-          <!-- Mock Drafts -->
-          <text class="draft-section-label">系统草稿模板</text>
-          <view v-for="md in mockDrafts" :key="md.id" class="draft-card draft-mock">
-            <view class="draft-info">
-              <text class="draft-title">{{ md.title }}</text>
-              <text class="draft-preview">{{ md.content }}</text>
-            </view>
-            <view class="draft-actions">
-              <view class="draft-btn publish-btn" @click="useMockDraft(md)">
-                <text class="draft-btn-publish">使用</text>
-              </view>
-            </view>
-          </view>
-          <view v-if="store.myDraftPosts.length === 0 && mockDrafts.length === 0" class="draft-empty">
-            <text class="draft-empty-text">暂无草稿</text>
-          </view>
-        </scroll-view>
-        <view class="modal-actions modal-actions-center">
-          <view class="modal-btn cancel-btn" @click="showDraftsModal = false">
-            <text class="modal-btn-text">关闭</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
     <!-- Rating Modal -->
     <view v-if="showRatingModal" class="modal-overlay" @click="showRatingModal = false">
       <view class="modal-card" @click.stop>
@@ -491,10 +450,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
 import GlobalSOS from '@/components/GlobalSOS.vue'
 import { MOCK_THEMES } from '@/data/mock'
-import type { UserProfile, Activity, Post } from '@/data/types'
+import * as postApi from '@/api/post'
+import type { UserProfile, Activity, PostListItemVO } from '@/data/types'
 
 const store = useAppStore()
 
@@ -503,9 +464,63 @@ const subTabs = [
   { key: 'activities' as const, label: '活动' },
   { key: 'posts' as const, label: '帖子' },
   { key: 'longterm' as const, label: '固定参加' },
-  { key: 'liked' as const, label: '点赞' }
+  { key: 'favorites' as const, label: '收藏' }
 ]
-const profileSubTab = ref<'activities' | 'posts' | 'longterm' | 'liked'>('activities')
+const profileSubTab = ref<'activities' | 'posts' | 'longterm' | 'favorites'>('activities')
+
+// 我的帖子 / 我的收藏（后端 §4.6 / §4.7）
+const myPosts = ref<PostListItemVO[]>([])
+const myFavorites = ref<PostListItemVO[]>([])
+
+async function loadMyPosts() {
+  if (!store.userProfile) return
+  try {
+    const res = await postApi.getMyPosts({ pageNum: 1, pageSize: 20 })
+    myPosts.value = res.records
+  } catch {
+    /* request 层已提示 */
+  }
+}
+
+async function loadMyFavorites() {
+  if (!store.userProfile) return
+  try {
+    const res = await postApi.getMyFavorites({ pageNum: 1, pageSize: 20 })
+    myFavorites.value = res.records
+  } catch {
+    /* request 层已提示 */
+  }
+}
+
+function goDetail(postId: number) {
+  uni.navigateTo({ url: `/pages/post-detail/post-detail?postId=${postId}` })
+}
+
+function goCertify() {
+  uni.navigateTo({ url: '/pages/certify/certify' })
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso.replace(/-/g, '/'))
+  if (isNaN(d.getTime())) return iso
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min}分钟前`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour}小时前`
+  const day = Math.floor(hour / 24)
+  if (day < 7) return `${day}天前`
+  return iso.slice(0, 10)
+}
+
+// 每次进入刷新用户信息（认证状态可能在别处变更）+ 我的帖子 / 收藏（含发帖后返回）
+onShow(() => {
+  store.refreshUserInfo()
+  loadMyPosts()
+  loadMyFavorites()
+})
 
 // Sidebar
 const showSidebar = ref<boolean>(false)
@@ -516,7 +531,6 @@ const showCreditLogModal = ref<boolean>(false)
 const showEmergencyContactModal = ref<boolean>(false)
 const showCustomerSupportModal = ref<boolean>(false)
 const showGuidelinesModal = ref<boolean>(false)
-const showDraftsModal = ref<boolean>(false)
 const showRatingModal = ref<boolean>(false)
 const showSettingsModal = ref<boolean>(false)
 const servicePanel = ref<string>('')
@@ -559,12 +573,14 @@ const ratingStars = ref<number>(0)
 const ratingComment = ref<string>('')
 const activityRatings = reactive<Record<string, boolean>>({})
 
-// Mock drafts
-const mockDrafts = ref([
-  { id: 'md_1', title: '周末咖啡探店约伴', content: '想找个搭子一起去学校附近的猫咖，AA制...' },
-  { id: 'md_2', title: '夜跑打卡求队友', content: '每天晚上8点操场5公里，找跑友互相监督...' },
-  { id: 'md_3', title: '图书馆自习搭子', content: '期末复习，求一个可以互相监督的自习搭子...' }
-])
+// Computed: 认证状态（实名 + 学籍，均通过才算已认证）
+const verifyStatus = computed<{ verified: boolean; label: string }>(() => {
+  const idOk = !!store.userProfile?.isIdVerified
+  const schoolOk = !!store.userProfile?.isSchoolVerified
+  if (idOk && schoolOk) return { verified: true, label: '已认证' }
+  if (!idOk && !schoolOk) return { verified: false, label: '未认证' }
+  return { verified: false, label: idOk ? '学籍未认证' : '实名未认证' }
+})
 
 // Computed: all my activities (created + joined)
 const allMyActivities = computed<Activity[]>(() => {
@@ -704,26 +720,6 @@ function submitRating() {
   showRatingModal.value = false
 }
 
-// Draft operations
-function publishDraft(draftId: string) {
-  const updatedList = store.postList.map((p) => {
-    if (p.id === draftId) return { ...p, isDraft: false, createdAt: '刚刚' }
-    return p
-  })
-  store.updatePostList(updatedList)
-  uni.showToast({ title: '草稿已发布', icon: 'success' })
-}
-
-function deleteDraft(draftId: string) {
-  const updatedList = store.postList.filter((p) => p.id !== draftId)
-  store.updatePostList(updatedList)
-  uni.showToast({ title: '草稿已删除', icon: 'success' })
-}
-
-function useMockDraft(md: { title: string; content: string }) {
-  // Navigate to publish post page with mock draft data
-  uni.showToast({ title: '请前往发帖页面发布', icon: 'none' })
-}
 </script>
 
 <style lang="scss" scoped>
@@ -838,6 +834,12 @@ function useMockDraft(md: { title: string; content: string }) {
           background-color: #eff6ff;
           border-radius: 10rpx;
           border: 1px solid #bfdbfe;
+
+          &.unverified {
+            color: #d97706;
+            background-color: #fffbeb;
+            border-color: #fde68a;
+          }
         }
       }
 
@@ -871,6 +873,44 @@ function useMockDraft(md: { title: string; content: string }) {
       border-radius: 20rpx;
       font-size: 22rpx;
       color: #2563eb;
+    }
+  }
+
+  .certify-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 24rpx;
+    padding: 20rpx 24rpx;
+    background-color: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 16rpx;
+
+    .certify-entry-left {
+      flex: 1;
+      margin-right: 16rpx;
+      overflow: hidden;
+
+      .certify-entry-title {
+        font-size: 26rpx;
+        font-weight: 600;
+        color: #d97706;
+        display: block;
+      }
+
+      .certify-entry-desc {
+        font-size: 22rpx;
+        color: #b45309;
+        margin-top: 4rpx;
+        display: block;
+      }
+    }
+
+    .certify-entry-arrow {
+      font-size: 24rpx;
+      color: #d97706;
+      font-weight: 600;
+      flex-shrink: 0;
     }
   }
 }
@@ -1522,96 +1562,5 @@ function useMockDraft(md: { title: string; content: string }) {
   }
 }
 
-// Drafts
-.drafts-list {
-  max-height: 500rpx;
-}
-
-.draft-section-label {
-  font-size: 24rpx;
-  color: #999;
-  font-weight: 500;
-  margin: 16rpx 0 10rpx;
-  display: block;
-}
-
-.draft-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20rpx;
-  background-color: #f9fafb;
-  border-radius: 12rpx;
-  margin-bottom: 12rpx;
-
-  &.draft-mock {
-    background-color: #fefce8;
-  }
-
-  .draft-info {
-    flex: 1;
-    margin-right: 16rpx;
-    overflow: hidden;
-
-    .draft-title {
-      font-size: 26rpx;
-      font-weight: 600;
-      color: #1a1a1a;
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .draft-preview {
-      font-size: 22rpx;
-      color: #999;
-      margin-top: 6rpx;
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-
-  .draft-actions {
-    display: flex;
-    gap: 12rpx;
-    flex-shrink: 0;
-
-    .draft-btn {
-      padding: 10rpx 20rpx;
-      border-radius: 16rpx;
-
-      &.delete-btn {
-        background-color: #fef2f2;
-
-        .draft-btn-delete {
-          font-size: 22rpx;
-          color: #ef4444;
-        }
-      }
-
-      &.publish-btn {
-        background-color: #2563eb;
-
-        .draft-btn-publish {
-          font-size: 22rpx;
-          color: #fff;
-        }
-      }
-    }
-  }
-}
-
-.draft-empty {
-  text-align: center;
-  padding: 60rpx 0;
-
-  .draft-empty-text {
-    font-size: 26rpx;
-    color: #ccc;
-  }
-}
 </style>
 

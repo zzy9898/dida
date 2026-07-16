@@ -74,3 +74,19 @@ export function getUserInfo(): Promise<UserInfoVO> {
     showError: false,
   })
 }
+
+/** 3.6 实名认证（姓名 + 身份证号核验）；成功后应刷新用户信息 */
+export function verifyIdcard(userId: string, name: string, idCard: string): Promise<null> {
+  return request<null>({
+    url: `/users/${encodeURIComponent(userId)}/verifyIdcard` + toQuery({ name, idCard }),
+    method: 'POST',
+  })
+}
+
+/** 3.7 学籍认证（学信网在线验证码核验）；成功后应刷新用户信息 */
+export function verifySchool(userId: string, verifyCode: string): Promise<null> {
+  return request<null>({
+    url: `/users/${encodeURIComponent(userId)}/verifySchool` + toQuery({ verifyCode }),
+    method: 'POST',
+  })
+}

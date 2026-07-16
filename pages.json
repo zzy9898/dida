@@ -50,6 +50,18 @@
       }
     },
     {
+      "path": "pages/post-detail/post-detail",
+      "style": {
+        "navigationBarTitleText": "帖子详情"
+      }
+    },
+    {
+      "path": "pages/certify/certify",
+      "style": {
+        "navigationBarTitleText": "身份认证"
+      }
+    },
+    {
       "path": "pages/verify/verify",
       "style": {
         "navigationBarTitleText": "学籍认证",

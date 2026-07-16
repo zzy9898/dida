@@ -26,6 +26,8 @@ export interface UserProfile {
   emergencyContactName: string;
   emergencyContactPhone: string;
   creditScore: number;
+  isIdVerified: boolean;
+  isSchoolVerified: boolean;
   hideSOS?: boolean;
 }
 
@@ -46,31 +48,6 @@ export interface Activity {
   creatorUid: string;
   creatorName: string;
   creatorAvatar: string;
-}
-
-export interface Post {
-  id: string;
-  title: string;
-  content: string;
-  images: string[];
-  school: string;
-  authorName: string;
-  authorAvatar: string;
-  authorVerified: boolean;
-  likes: number;
-  likedBy: string[];
-  comments: Comment[];
-  createdAt: string;
-  category?: string;
-  isDraft?: boolean;
-}
-
-export interface Comment {
-  id: string;
-  authorName: string;
-  authorAvatar: string;
-  content: string;
-  createdAt: string;
 }
 
 export interface ClassmateMatch {
@@ -206,4 +183,117 @@ export interface Result<T = unknown> {
   message: string;
   data: T;
   timestamp: number;
+}
+
+// ==================== 帖子接口数据模型（见 docs/API.md §4、§8.7–8.12） ====================
+
+/** 帖子状态 */
+export type PostStatus = "NORMAL" | "USER_DELETED" | "VIOLATION_REMOVED" | "PENDING_REVIEW";
+
+/** 图片 / 视频媒体项 */
+export interface MediaItem {
+  type: string;   // "image" / "video"
+  url: string;
+}
+
+/** 分页结果 */
+export interface PageResult<T> {
+  records: T[];
+  total: number;
+  pageNum: number;
+  pageSize: number;
+}
+
+/** 帖子分类（§8.7 ForumCategoryVO） */
+export interface ForumCategoryVO {
+  id: number;
+  name: string;
+  iconUrl: string;
+  description: string;
+  sortOrder: number;
+}
+
+/** 帖子列表项（§8.10 PostListItemVO） */
+export interface PostListItemVO {
+  id: number;
+  userId: number;
+  userNickname: string;
+  userImageUrl: string;
+  categoryId: number;
+  categoryName: string;
+  title: string;
+  content: string;
+  media: MediaItem[];
+  locationName: string;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  favoriteCount: number;
+  isTop: boolean;
+  liked: boolean;
+  favorited: boolean;
+  createTime: string;
+}
+
+/** 帖子详情（§8.8 PostDetailVO） */
+export interface PostDetailVO {
+  id: number;
+  userId: number;
+  userNickname: string;
+  userImageUrl: string;
+  categoryId: number;
+  categoryName: string;
+  title: string;
+  content: string;
+  media: MediaItem[];
+  locationName: string;
+  longitude: number | null;
+  latitude: number | null;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  favoriteCount: number;
+  isTop: boolean;
+  status: PostStatus;
+  liked: boolean;
+  favorited: boolean;
+  canDelete: boolean;
+  createTime: string;
+  updateTime: string;
+}
+
+/** 评论 / 回复（§8.11 CommentVO） */
+export interface CommentVO {
+  id: number;
+  postId: number;
+  userId: number;
+  userNickname: string;
+  userImageUrl: string;
+  rootId: number | null;
+  parentId: number | null;
+  replyUserId: number | null;
+  replyUserNickname: string | null;
+  content: string;
+  likeCount: number;
+  replyCount: number;
+  liked: boolean;
+  canDelete: boolean;
+  createTime: string;
+}
+
+/** 发帖请求体（§4.4） */
+export interface CreatePostParam {
+  categoryId: number;
+  title: string;
+  content: string;
+  media?: MediaItem[];
+  locationName?: string;
+  longitude?: number;
+  latitude?: number;
+}
+
+/** 发表评论 / 回复请求体（§4.10） */
+export interface CommentParam {
+  content: string;
+  parentId?: number;
 }

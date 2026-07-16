@@ -9,111 +9,94 @@
     <scroll-view scroll-x class="category-tabs" :show-scrollbar="false">
       <view class="tab-list">
         <view
-          v-for="cat in categories"
-          :key="cat"
-          :class="['tab-item', { active: forumCategory === cat }]"
-          @click="changeCategory(cat)"
+          v-for="tab in tabs"
+          :key="tab.id ?? 'all'"
+          :class="['tab-item', { active: selectedCategoryId === tab.id }]"
+          @click="changeCategory(tab.id)"
         >
-          <text class="tab-text">{{ cat }}</text>
+          <text class="tab-text">{{ tab.name }}</text>
         </view>
       </view>
     </scroll-view>
 
     <!-- Post List -->
-    <scroll-view scroll-y class="post-list" @scrolltolower="loadMore" :refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onRefresh">
+    <scroll-view
+      scroll-y
+      class="post-list"
+      @scrolltolower="loadMore"
+      :refresher-enabled="true"
+      :refresher-triggered="refreshing"
+      @refresherrefresh="onRefresh"
+    >
       <view class="post-list-content">
-      <view v-if="filteredPosts.length === 0" class="empty-state">
-        <text class="empty-icon">📝</text>
-        <text class="empty-text">暂无相关帖子</text>
-        <text class="empty-sub">换个分类看看，或者去发布你的第一条帖子吧</text>
-      </view>
-
-      <view v-for="post in filteredPosts" :key="post.id" class="post-card">
-        <!-- Author Row -->
-        <view class="post-author-row">
-          <image :src="post.authorAvatar" class="author-avatar" mode="aspectFill" />
-          <view class="author-info">
-            <view class="author-name-row">
-              <text class="author-name">{{ post.authorName }}</text>
-              <text v-if="post.authorVerified" class="verified-badge">已认证</text>
-            </view>
-            <text class="post-meta">{{ post.school }} · {{ post.createdAt }}</text>
-          </view>
-          <view class="post-category-tag">
-            <text class="category-text">{{ post.category || '综合' }}</text>
-          </view>
+        <view v-if="!loading && posts.length === 0" class="empty-state">
+          <text class="empty-icon">📝</text>
+          <text class="empty-text">暂无相关帖子</text>
+          <text class="empty-sub">换个分类看看，或者去发布你的第一条帖子吧</text>
         </view>
 
-        <!-- Content -->
-        <view class="post-body">
-          <text class="post-title">{{ post.title }}</text>
-          <text class="post-content">{{ post.content }}</text>
-          <view v-if="post.images && post.images.length > 0" class="post-images" :class="{ 'single-image': post.images.length === 1, 'multi-image': post.images.length > 1 }">
-            <image
-              v-for="(img, idx) in post.images"
-              :key="idx"
-              :src="img"
-              class="post-image"
-              mode="aspectFill"
-              @click="previewImage(post.images, idx)"
-            />
-          </view>
-        </view>
-
-        <!-- Actions -->
-        <view class="post-actions">
-          <view class="action-item" @click="toggleLike(post)">
-            <text :class="likedPosts[post.id] ? 'action-icon liked' : 'action-icon'">
-              {{ likedPosts[post.id] ? '❤️' : '🤍' }}
-            </text>
-            <text :class="likedPosts[post.id] ? 'action-text liked-text' : 'action-text'">{{ post.likes }}</text>
-          </view>
-          <view class="action-item" @click="toggleComments(post.id)">
-            <text class="action-icon">💬</text>
-            <text class="action-text">{{ post.comments.length }}</text>
-          </view>
-          <view class="action-item" @click="sharePost(post)">
-            <text class="action-icon">🔗</text>
-            <text class="action-text">分享</text>
-          </view>
-        </view>
-
-        <!-- Comment Section -->
-        <view v-if="expandedComments[post.id]" class="comments-section">
-          <view class="comments-divider" />
-          <view v-for="comment in post.comments" :key="comment.id" class="comment-item">
-            <image :src="comment.authorAvatar" class="comment-avatar" mode="aspectFill" />
-            <view class="comment-body">
-              <view class="comment-header">
-                <text class="comment-author">{{ comment.authorName }}</text>
-                <text class="comment-time">{{ comment.createdAt }}</text>
+        <view
+          v-for="post in posts"
+          :key="post.id"
+          class="post-card"
+          @click="goDetail(post)"
+        >
+          <!-- Author Row -->
+          <view class="post-author-row">
+            <image :src="post.userImageUrl" class="author-avatar" mode="aspectFill" />
+            <view class="author-info">
+              <view class="author-name-row">
+                <text class="author-name">{{ post.userNickname }}</text>
               </view>
-              <text class="comment-text">{{ comment.content }}</text>
+              <text class="post-meta">{{ post.locationName || post.categoryName }} · {{ formatTime(post.createTime) }}</text>
+            </view>
+            <view class="post-category-tag">
+              <text class="category-text">{{ post.categoryName }}</text>
             </view>
           </view>
-          <view v-if="post.comments.length === 0" class="no-comments">
-            <text class="no-comments-text">暂无评论，快来抢沙发吧</text>
+
+          <!-- Content -->
+          <view class="post-body">
+            <text class="post-title">{{ post.title }}</text>
+            <text class="post-content">{{ post.content }}</text>
+            <view
+              v-if="post.media && post.media.length > 0"
+              class="post-images"
+              :class="{ 'single-image': post.media.length === 1, 'multi-image': post.media.length > 1 }"
+            >
+              <image
+                v-for="(m, idx) in post.media"
+                :key="idx"
+                :src="m.url"
+                class="post-image"
+                mode="aspectFill"
+                @click.stop="previewImage(post.media, idx)"
+              />
+            </view>
           </view>
 
-          <!-- Comment Input -->
-          <view class="comment-input-row">
-            <input
-              v-model="newCommentTexts[post.id]"
-              class="comment-input"
-              placeholder="写下你的评论..."
-              confirm-type="send"
-              @confirm="addComment(post)"
-            />
-            <view class="send-btn" @click="addComment(post)">
-              <text class="send-btn-text">发送</text>
+          <!-- Actions -->
+          <view class="post-actions">
+            <view class="action-item" @click.stop="toggleLike(post)">
+              <text :class="post.liked ? 'action-icon liked' : 'action-icon'">
+                {{ post.liked ? '❤️' : '🤍' }}
+              </text>
+              <text :class="post.liked ? 'action-text liked-text' : 'action-text'">{{ post.likeCount }}</text>
+            </view>
+            <view class="action-item" @click.stop="goDetail(post)">
+              <text class="action-icon">💬</text>
+              <text class="action-text">{{ post.commentCount }}</text>
+            </view>
+            <view class="action-item">
+              <text class="action-icon">⭐</text>
+              <text class="action-text">{{ post.favoriteCount }}</text>
             </view>
           </view>
         </view>
-      </view>
 
-      <view class="list-bottom">
-        <text class="bottom-text">-- 已经到底啦 --</text>
-      </view>
+        <view v-if="posts.length > 0" class="list-bottom">
+          <text class="bottom-text">{{ noMore ? '-- 已经到底啦 --' : '加载中...' }}</text>
+        </view>
       </view>
     </scroll-view>
     <GlobalSOS v-if="!store.userProfile || !store.userProfile.hideSOS" />
@@ -121,171 +104,122 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
+import * as postApi from '@/api/post'
 import GlobalSOS from '@/components/GlobalSOS.vue'
-import type { Post, Comment } from '@/data/types'
+import type { PostListItemVO, MediaItem } from '@/data/types'
 
 const store = useAppStore()
 
-// Category state
-const categories = ['最新发布', '热门推荐', '求助吐槽', '美味探店', '运动打卡', '自学研习', '桌游社交']
-const forumCategory = ref<string>('最新发布')
+const PAGE_SIZE = 10
 
-// Local liked posts tracking
-const likedPosts = reactive<Record<string, boolean>>({})
+// 分类：[全部] + 后端分类
+const selectedCategoryId = ref<number | undefined>(undefined)
+const tabs = computed(() => [
+  { id: undefined as number | undefined, name: '全部' },
+  ...store.postCategories.map((c) => ({ id: c.id as number | undefined, name: c.name })),
+])
 
-// New comment texts per post
-const newCommentTexts = reactive<Record<string, string>>({})
+// 列表 + 分页状态
+const posts = ref<PostListItemVO[]>([])
+const pageNum = ref(1)
+const total = ref(0)
+const loading = ref(false)
+const refreshing = ref(false)
+const noMore = computed(() => posts.value.length >= total.value)
 
-// Which posts have expanded comments
-const expandedComments = reactive<Record<string, boolean>>({})
-
-// Refresh state
-const refreshing = ref<boolean>(false)
-
-// Keyword mapping for category filtering
-const categoryKeywords: Record<string, string[]> = {
-  '求助吐槽': ['求助', '吐槽', '坑', '避雷', '排雷', '生气', '差评', '翻车'],
-  '美味探店': ['咖啡', '探店', '美食', '吃', '餐厅', '食堂', '甜品', '奶茶', '外卖', '小吃', '猫咖'],
-  '运动打卡': ['运动', '跑步', '健身', '羽毛球', '篮球', '游泳', '网球', '打卡', '夜跑', '操场', '球友', '配速'],
-  '自学研习': ['自习', '学习', '复习', '考试', '图书馆', '期末', '研习', '论文', '刷题', '自修', '抱团复习'],
-  '桌游社交': ['桌游', '游戏', '社交', '聚会', '狼人', '剧本', '阿瓦隆', '血染', '轰趴', 'party', '组队']
-}
-
-// Filtered posts computed
-const filteredPosts = computed<Post[]>(() => {
-  let list = store.postList.filter((p) => !p.isDraft)
-
-  if (forumCategory.value === '最新发布') {
-    return list
-  }
-
-  if (forumCategory.value === '热门推荐') {
-    return [...list].sort((a, b) => b.likes - a.likes)
-  }
-
-  const keywords = categoryKeywords[forumCategory.value] || []
-  return list.filter((post) => {
-    if (post.category === forumCategory.value) return true
-    if (keywords.length === 0) return true
-    const searchText = (post.title + ' ' + post.content).toLowerCase()
-    return keywords.some((kw) => searchText.includes(kw.toLowerCase()))
-  })
-})
-
-// Initialize liked posts from store data
-function initLikedPosts() {
-  if (!store.userProfile) return
-  const uid = store.userProfile.uid
-  const nickname = store.userProfile.nickname
-  store.postList.forEach((post) => {
-    if (post.likedBy) {
-      likedPosts[post.id] = post.likedBy.includes(uid) || post.likedBy.includes(nickname)
-    }
-    if (!(post.id in newCommentTexts)) {
-      newCommentTexts[post.id] = ''
-    }
-    if (!(post.id in expandedComments)) {
-      expandedComments[post.id] = false
-    }
-  })
-}
-
-onMounted(() => {
-  initLikedPosts()
-})
-
-// Change category
-function changeCategory(cat: string) {
-  forumCategory.value = cat
-}
-
-// Toggle like
-function toggleLike(post: Post) {
-  const wasLiked = likedPosts[post.id]
-  likedPosts[post.id] = !wasLiked
-
-  const updatedList = store.postList.map((p) => {
-    if (p.id === post.id) {
-      const newLikes = wasLiked ? Math.max(0, p.likes - 1) : p.likes + 1
-      const newLikedBy = wasLiked
-        ? p.likedBy.filter((id) => id !== store.userProfile?.uid && id !== store.userProfile?.nickname)
-        : [...p.likedBy, store.userProfile?.uid || store.userProfile?.nickname || '']
-      return { ...p, likes: newLikes, likedBy: newLikedBy }
-    }
-    return p
-  })
-  store.updatePostList(updatedList)
-
-  if (!wasLiked) {
-    uni.showToast({ title: '已点赞', icon: 'none', duration: 1500 })
+async function loadCategories() {
+  try {
+    await store.loadCategories()
+  } catch {
+    // 分类加载失败不阻塞列表（request 层已提示）
   }
 }
 
-// Toggle comment visibility
-function toggleComments(postId: string) {
-  expandedComments[postId] = !expandedComments[postId]
-}
-
-// Add comment
-function addComment(post: Post) {
-  const text = (newCommentTexts[post.id] || '').trim()
-  if (!text) {
-    uni.showToast({ title: '请输入评论内容', icon: 'none' })
-    return
+async function fetchPage(reset: boolean) {
+  if (loading.value) return
+  if (!reset && noMore.value) return
+  loading.value = true
+  const targetPage = reset ? 1 : pageNum.value + 1
+  try {
+    const res = await postApi.getPosts({
+      categoryId: selectedCategoryId.value,
+      pageNum: targetPage,
+      pageSize: PAGE_SIZE,
+    })
+    pageNum.value = res.pageNum
+    total.value = res.total
+    posts.value = reset ? res.records : [...posts.value, ...res.records]
+  } catch {
+    // request 层已 toast
+  } finally {
+    loading.value = false
   }
-  if (!store.userProfile) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    return
-  }
-
-  const newComment: Comment = {
-    id: `com_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    authorName: store.userProfile.nickname,
-    authorAvatar: store.userProfile.avatar,
-    content: text,
-    createdAt: '刚刚'
-  }
-
-  const updatedList = store.postList.map((p) => {
-    if (p.id === post.id) {
-      return { ...p, comments: [...p.comments, newComment] }
-    }
-    return p
-  })
-  store.updatePostList(updatedList)
-  newCommentTexts[post.id] = ''
-  uni.showToast({ title: '评论成功', icon: 'success', duration: 1500 })
 }
 
-// Share post
-function sharePost(post: Post) {
-  uni.showToast({ title: '分享功能开发中...', icon: 'none' })
+function changeCategory(id: number | undefined) {
+  if (selectedCategoryId.value === id) return
+  selectedCategoryId.value = id
+  posts.value = []
+  total.value = 0
+  fetchPage(true)
 }
 
-// Preview image
-function previewImage(images: string[], current: number) {
-  uni.previewImage({
-    urls: images,
-    current: String(current)
-  })
-}
-
-// Load more
 function loadMore() {
-  // Placeholder for pagination
+  fetchPage(false)
 }
 
-// Pull to refresh
-function onRefresh() {
+async function onRefresh() {
   refreshing.value = true
-  initLikedPosts()
-  setTimeout(() => {
-    refreshing.value = false
-    uni.showToast({ title: '已刷新', icon: 'success', duration: 1000 })
-  }, 800)
+  await fetchPage(true)
+  refreshing.value = false
 }
+
+function goDetail(post: PostListItemVO) {
+  uni.navigateTo({ url: `/pages/post-detail/post-detail?postId=${post.id}` })
+}
+
+async function toggleLike(post: PostListItemVO) {
+  const wasLiked = post.liked
+  // 乐观更新
+  post.liked = !wasLiked
+  post.likeCount = Math.max(0, post.likeCount + (wasLiked ? -1 : 1))
+  try {
+    await (wasLiked ? postApi.unlikePost(post.id) : postApi.likePost(post.id))
+  } catch {
+    // 回滚
+    post.liked = wasLiked
+    post.likeCount = Math.max(0, post.likeCount + (wasLiked ? 1 : -1))
+  }
+}
+
+function previewImage(media: MediaItem[], current: number) {
+  uni.previewImage({ urls: media.map((m) => m.url), current: String(current) })
+}
+
+/** 后端返回 ISO 时间 → 友好展示 */
+function formatTime(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso.replace(/-/g, '/'))
+  if (isNaN(d.getTime())) return iso
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min}分钟前`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour}小时前`
+  const day = Math.floor(hour / 24)
+  if (day < 7) return `${day}天前`
+  return iso.slice(0, 10)
+}
+
+// 每次进入（含发帖后 switchTab 返回）刷新列表
+onShow(() => {
+  loadCategories()
+  fetchPage(true)
+})
 </script>
 
 <style lang="scss" scoped>
@@ -403,6 +337,7 @@ function onRefresh() {
     height: 72rpx;
     border-radius: 50%;
     flex-shrink: 0;
+    background-color: #f0f0f0;
   }
 
   .author-info {
@@ -418,20 +353,10 @@ function onRefresh() {
         font-size: 28rpx;
         font-weight: 600;
         color: #1a1a1a;
-        max-width: 230rpx;
+        max-width: 300rpx;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-      }
-
-      .verified-badge {
-        margin-left: 10rpx;
-        padding: 2rpx 12rpx;
-        font-size: 20rpx;
-        color: #2563eb;
-        background-color: #eff6ff;
-        border-radius: 8rpx;
-        border: 1px solid #bfdbfe;
       }
     }
 
@@ -463,7 +388,7 @@ function onRefresh() {
   .post-list-content { padding-left: 18rpx; padding-right: 18rpx; }
   .post-card { padding: 22rpx; }
   .post-author-row .author-info { margin-left: 14rpx; }
-  .post-author-row .author-info .author-name-row .author-name { font-size: 26rpx; max-width: 190rpx; }
+  .post-author-row .author-info .author-name-row .author-name { font-size: 26rpx; max-width: 240rpx; }
   .post-author-row .post-category-tag { padding: 5rpx 12rpx; }
   .post-body .post-title { font-size: 29rpx; }
   .post-body .post-content { font-size: 25rpx; }
@@ -487,6 +412,11 @@ function onRefresh() {
     color: #444;
     line-height: 1.6;
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
   }
 
   .post-images {
@@ -549,98 +479,6 @@ function onRefresh() {
   0% { transform: scale(1); }
   50% { transform: scale(1.3); }
   100% { transform: scale(1); }
-}
-
-.comments-section {
-  margin-top: 20rpx;
-
-  .comments-divider {
-    height: 1px;
-    background-color: #f0f0f0;
-    margin-bottom: 20rpx;
-  }
-
-  .comment-item {
-    display: flex;
-    margin-bottom: 20rpx;
-
-    .comment-avatar {
-      width: 56rpx;
-      height: 56rpx;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .comment-body {
-      flex: 1;
-      margin-left: 16rpx;
-      background-color: #f8f9fa;
-      border-radius: 12rpx;
-      padding: 16rpx 20rpx;
-
-      .comment-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8rpx;
-
-        .comment-author {
-          font-size: 24rpx;
-          font-weight: 600;
-          color: #2563eb;
-        }
-
-        .comment-time {
-          font-size: 20rpx;
-          color: #bbb;
-        }
-      }
-
-      .comment-text {
-        font-size: 26rpx;
-        color: #444;
-        line-height: 1.5;
-      }
-    }
-  }
-
-  .no-comments {
-    text-align: center;
-    padding: 30rpx 0;
-
-    .no-comments-text {
-      font-size: 24rpx;
-      color: #ccc;
-    }
-  }
-
-  .comment-input-row {
-    display: flex;
-    align-items: center;
-    margin-top: 20rpx;
-
-    .comment-input {
-      flex: 1;
-      height: 68rpx;
-      background-color: #f5f5f5;
-      border-radius: 34rpx;
-      padding: 0 28rpx;
-      font-size: 26rpx;
-    }
-
-    .send-btn {
-      margin-left: 16rpx;
-      padding: 12rpx 32rpx;
-      background-color: #2563eb;
-      border-radius: 34rpx;
-
-      .send-btn-text {
-        font-size: 26rpx;
-        color: #fff;
-        font-weight: 500;
-      }
-    }
-  }
 }
 
 .list-bottom {
