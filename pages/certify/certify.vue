@@ -35,7 +35,13 @@
           </view>
           <view class="field">
             <text class="field-label">身份证号</text>
-            <input v-model="idForm.idCard" class="field-input" placeholder="请输入 18 位身份证号" maxlength="18" />
+            <input
+              v-model="idForm.idCard"
+              class="field-input"
+              placeholder="请输入 18 位身份证号"
+              maxlength="24"
+              @blur="normalizeIdCardInput"
+            />
           </view>
           <view class="submit-btn" :class="{ 'submit-btn--loading': idLoading }" @tap="submitIdcard">
             <text>{{ idLoading ? '认证中...' : '提交实名认证' }}</text>
@@ -94,12 +100,37 @@ function handleBack() {
   uni.navigateBack({ delta: 1 })
 }
 
+function normalizeIdCard(value: string) {
+  return value
+    .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/[ｘＸ]/g, 'X')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+}
+
+function normalizeIdCardInput() {
+  idForm.idCard = normalizeIdCard(idForm.idCard)
+}
+
+function isValidMainlandIdCard(value: string) {
+  if (!/^\d{17}[\dX]$/.test(value)) return false
+  const year = Number(value.slice(6, 10))
+  const month = Number(value.slice(10, 12))
+  const day = Number(value.slice(12, 14))
+  const birthday = new Date(year, month - 1, day)
+  if (year < 1800 || birthday.getFullYear() !== year || birthday.getMonth() !== month - 1 || birthday.getDate() !== day) return false
+  const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+  const checkCodes = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+  const sum = weights.reduce((total, weight, index) => total + Number(value[index]) * weight, 0)
+  return value[17] === checkCodes[sum % 11]
+}
 async function submitIdcard() {
   if (idLoading.value) return
   const name = idForm.name.trim()
-  const idCard = idForm.idCard.trim()
+  const idCard = normalizeIdCard(idForm.idCard)
+  idForm.idCard = idCard
   if (!name) return uni.showToast({ title: '请输入真实姓名', icon: 'none' })
-  if (!/^\d{17}[\dXx]$/.test(idCard)) return uni.showToast({ title: '身份证号格式不正确', icon: 'none' })
+  if (!isValidMainlandIdCard(idCard)) return uni.showToast({ title: '身份证号格式或校验位不正确', icon: 'none' })
   const uid = store.userProfile?.uid
   if (!uid) return uni.showToast({ title: '请先登录', icon: 'none' })
 
