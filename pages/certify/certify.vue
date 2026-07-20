@@ -84,8 +84,31 @@
 import { ref, reactive, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import * as userApi from '@/api/user'
+import { RequestError } from '@/utils/request'
 
 const store = useAppStore()
+
+/** 认证失败统一提示：优先给面向用户的可读文案，避免透传后端「客户端异常」等技术信息 */
+function toastVerifyError(err: unknown, kind: 'id' | 'school') {
+  const code = err instanceof RequestError ? err.code : undefined
+  const raw = err instanceof Error ? err.message : ''
+  console.warn('[certify] 认证失败', kind, { code, raw })
+  if (code === 401) return // request 层已跳转登录，无需再 toast
+  // code:500 是系统异常（后端已给「系统异常，请稍后重试」）；code:404 是核验失败（message 统一为「验证失败」）
+  // 把笼统的「验证失败」替换为可操作文案；「该校不在服务范围内」等具体 message 则直接透传。
+  const genericFail = !raw || raw === '验证失败'
+  let title: string
+  if (kind === 'id') {
+    // 实名：姓名与身份证号不匹配（doc §3.6）
+    title = genericFail ? '实名认证失败，请核对姓名与身份证号是否一致' : raw
+  } else {
+    // 学籍：学信网姓名需与注册真实姓名一致，且学籍状态为「在籍」（doc §3.7）
+    title = genericFail
+      ? '学籍认证失败，请确认学信网在线验证码有效，且姓名与注册真实姓名一致、学籍状态为在籍'
+      : raw
+  }
+  uni.showToast({ title, icon: 'none' })
+}
 
 const idVerified = computed(() => !!store.userProfile?.isIdVerified)
 const schoolVerified = computed(() => !!store.userProfile?.isSchoolVerified)
@@ -139,8 +162,8 @@ async function submitIdcard() {
     await userApi.verifyIdcard(uid, name, idCard)
     await store.refreshUserInfo()
     uni.showToast({ title: '实名认证成功', icon: 'success' })
-  } catch {
-    /* request 层已提示（404「验证失败」等） */
+  } catch (err) {
+    toastVerifyError(err, 'id')
   } finally {
     idLoading.value = false
   }
@@ -158,8 +181,8 @@ async function submitSchool() {
     await userApi.verifySchool(uid, verifyCode)
     await store.refreshUserInfo()
     uni.showToast({ title: '学籍认证成功', icon: 'success' })
-  } catch {
-    /* request 层已提示 */
+  } catch (err) {
+    toastVerifyError(err, 'school')
   } finally {
     schoolLoading.value = false
   }

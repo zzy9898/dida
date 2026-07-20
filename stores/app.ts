@@ -35,8 +35,9 @@ function mapVoToProfile(vo: UserLoginVO | UserInfoVO): UserProfile {
     emergencyContactName: '',
     emergencyContactPhone: '',
     creditScore: typeof vo.reputationScore === 'number' ? vo.reputationScore : 100,
-    isIdVerified: !!vo.isIdVerified,
-    isSchoolVerified: !!vo.isSchoolVerified,
+    // 后端 boolean 字段 isXxx 经 Jackson 序列化后可能去掉 is 前缀（→ idVerified/schoolVerified），两种拼写都兼容
+    isIdVerified: !!(vo.isIdVerified ?? (vo as any).idVerified),
+    isSchoolVerified: !!(vo.isSchoolVerified ?? (vo as any).schoolVerified),
   }
 }
 

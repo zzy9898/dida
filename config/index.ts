@@ -17,7 +17,7 @@ interface EnvConfig {
 
 /** 开发环境配置 */
 const dev: EnvConfig = {
-  API_BASE_URL: 'http://47.105.57.88:8080',
+  API_BASE_URL: 'http://127.0.0.1:8080',
   IM_SDK_APP_ID: 1600147812,                      // TODO(dev): 替换为开发 SDKAppID
   CAPTCHA_ID: '566cd6d1bfdd69f16f4c7295b6b33b02',                        // TODO(dev): 替换为开发 captchaId
 }
