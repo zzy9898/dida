@@ -1,6 +1,12 @@
 <template>
   <view class="page">
-    <scroll-view scroll-y class="scroll" @scrolltolower="loadMoreComments">
+    <scroll-view
+      scroll-y
+      class="scroll"
+      :scroll-into-view="scrollTarget"
+      :scroll-with-animation="true"
+      @scrolltolower="loadMoreComments"
+    >
       <template v-if="detail">
         <!-- Author -->
         <view class="author-row">
@@ -37,7 +43,7 @@
         </view>
 
         <!-- Comments -->
-        <view class="comments">
+        <view id="comments-anchor" class="comments">
           <text class="comments-title">评论 {{ detail.commentCount }}</text>
 
           <view v-if="comments.length === 0 && !commentsLoading" class="no-comments">
@@ -50,8 +56,8 @@
               <view class="comment-head">
                 <text class="comment-author">{{ c.userNickname }}</text>
                 <view class="comment-like" @tap="toggleCommentLike(c)">
-                  <text :class="c.liked ? 'clike-icon liked' : 'clike-icon'">{{ c.liked ? '❤️' : '🤍' }}</text>
-                  <text class="clike-count">{{ c.likeCount }}</text>
+                  <app-icon name="heart" :active="c.liked" :size="32" />
+                  <text :class="c.liked ? 'clike-count liked' : 'clike-count'">{{ c.likeCount }}</text>
                 </view>
               </view>
               <text class="comment-text">{{ c.content }}</text>
@@ -63,24 +69,32 @@
 
               <!-- Replies -->
               <view v-if="c.replyCount > 0" class="replies">
-                <view v-if="!repliesShown[c.id]" class="reply-toggle" @tap="toggleReplies(c)">
-                  <text class="reply-toggle-text">展开 {{ c.replyCount }} 条回复 ▾</text>
-                </view>
-                <template v-else>
-                  <view v-for="r in (repliesMap[c.id] || [])" :key="r.id" class="reply">
-                    <text class="reply-author">{{ r.userNickname }}</text>
-                    <text v-if="r.replyUserNickname" class="reply-to"> 回复 {{ r.replyUserNickname }}</text>
-                    <text class="reply-text">：{{ r.content }}</text>
+                <view v-for="r in (repliesMap[c.id] || [])" :key="r.id" class="reply">
+                  <image :src="r.userImageUrl" class="reply-avatar" mode="aspectFill" />
+                  <view class="reply-main">
+                    <view class="reply-head">
+                      <text class="reply-author">{{ r.userNickname }}</text>
+                      <text v-if="r.replyUserNickname" class="reply-to">回复 {{ r.replyUserNickname }}</text>
+                      <view class="reply-like" @tap="toggleCommentLike(r)">
+                        <app-icon name="heart" :active="r.liked" :size="28" />
+                        <text :class="r.liked ? 'clike-count liked' : 'clike-count'">{{ r.likeCount }}</text>
+                      </view>
+                    </view>
+                    <text class="reply-text">{{ r.content }}</text>
                     <view class="reply-foot">
                       <text class="comment-time">{{ formatTime(r.createTime) }}</text>
                       <text class="comment-action" @tap="startReply(r, c)">回复</text>
                       <text v-if="r.canDelete" class="comment-action" @tap="onDeleteComment(r, c)">删除</text>
                     </view>
                   </view>
-                  <view class="reply-toggle" @tap="collapseReplies(c)">
-                    <text class="reply-toggle-text">收起 ▴</text>
-                  </view>
-                </template>
+                </view>
+                <view
+                  v-if="!repliesAllLoaded[c.id] && c.replyCount > (repliesMap[c.id]?.length || 0)"
+                  class="reply-toggle"
+                  @tap="loadAllReplies(c)"
+                >
+                  <text class="reply-toggle-text">查看更多 {{ c.replyCount - (repliesMap[c.id]?.length || 0) }} 条回复 ▾</text>
+                </view>
               </view>
             </view>
           </view>
@@ -109,12 +123,12 @@
         <text class="cancel-reply-text">✕</text>
       </view>
       <view class="bar-action" @tap="togglePostLike">
-        <text :class="detail.liked ? 'bar-icon liked' : 'bar-icon'">{{ detail.liked ? '❤️' : '🤍' }}</text>
-        <text class="bar-count">{{ detail.likeCount }}</text>
+        <app-icon name="heart" :active="detail.liked" :size="44" />
+        <text :class="detail.liked ? 'bar-count liked' : 'bar-count'">{{ detail.likeCount }}</text>
       </view>
       <view class="bar-action" @tap="togglePostFavorite">
-        <text :class="detail.favorited ? 'bar-icon fav' : 'bar-icon'">{{ detail.favorited ? '⭐' : '☆' }}</text>
-        <text class="bar-count">{{ detail.favoriteCount }}</text>
+        <app-icon name="star" :active="detail.favorited" :size="44" />
+        <text :class="detail.favorited ? 'bar-count fav' : 'bar-count'">{{ detail.favoriteCount }}</text>
       </view>
       <view class="send-btn" @tap="submitComment">
         <text class="send-btn-text">发送</text>
@@ -141,11 +155,15 @@ const commentTotal = ref(0)
 const commentsLoading = ref(false)
 const commentsNoMore = ref(false)
 
-const repliesShown = ref<Record<number, boolean>>({})
 const repliesMap = ref<Record<number, CommentVO[]>>({})
+const repliesAllLoaded = ref<Record<number, boolean>>({})
 
 const commentText = ref('')
 const replyTarget = ref<CommentVO | null>(null)
+
+// 由列表页「评论」图标进入时携带 focus=comments，加载完成后滚动到评论区
+const focusComments = ref(false)
+const scrollTarget = ref('')
 
 onLoad((query) => {
   postId.value = String(query?.postId || '')
@@ -153,6 +171,7 @@ onLoad((query) => {
     uni.showToast({ title: '帖子不存在', icon: 'none' })
     return
   }
+  focusComments.value = query?.focus === 'comments'
   loadDetail()
   loadComments(true)
 })
@@ -160,6 +179,13 @@ onLoad((query) => {
 async function loadDetail() {
   try {
     detail.value = await postApi.getPostDetail(postId.value)
+    // 详情渲染出来后，锚点才存在，再触发滚动到评论区
+    if (focusComments.value) {
+      focusComments.value = false
+      setTimeout(() => {
+        scrollTarget.value = 'comments-anchor'
+      }, 300)
+    }
   } catch {
     // request 层已提示（如帖子不存在）
     setTimeout(() => uni.navigateBack(), 800)
@@ -180,6 +206,8 @@ async function loadComments(reset: boolean) {
     commentTotal.value = res.total
     comments.value = reset ? res.records : [...comments.value, ...res.records]
     commentsNoMore.value = comments.value.length >= res.total
+    // 自动预加载本批评论中有回复的条目（前两条）
+    res.records.filter((c) => c.replyCount > 0).forEach((c) => loadPreviewReplies(c))
   } catch {
     /* request 层已提示 */
   } finally {
@@ -262,9 +290,9 @@ async function submitComment() {
     commentText.value = ''
     replyTarget.value = null
     if (detail.value) detail.value.commentCount += 1
-    // 简单起见：重置一级评论并收起所有楼中楼后重新拉取
-    repliesShown.value = {}
+    // 简单起见：重置一级评论并重新拉取，楼中楼随之重置
     repliesMap.value = {}
+    repliesAllLoaded.value = {}
     commentsNoMore.value = false
     await loadComments(true)
     uni.showToast({ title: '评论成功', icon: 'success', duration: 1200 })
@@ -278,18 +306,29 @@ async function submitComment() {
   }
 }
 
-async function toggleReplies(c: CommentVO) {
-  repliesShown.value = { ...repliesShown.value, [c.id]: true }
+/** 预加载前两条回复（评论加载后自动调用） */
+async function loadPreviewReplies(c: CommentVO) {
   if (repliesMap.value[c.id]) return
+  try {
+    const res = await postApi.getReplies(c.id, { pageNum: 1, pageSize: 2 })
+    repliesMap.value = { ...repliesMap.value, [c.id]: res.records }
+    if (c.replyCount <= 2) {
+      repliesAllLoaded.value = { ...repliesAllLoaded.value, [c.id]: true }
+    }
+  } catch {
+    // 预加载失败静默处理，不影响主流程
+  }
+}
+
+/** 加载更多：拉取全部回复 */
+async function loadAllReplies(c: CommentVO) {
   try {
     const res = await postApi.getReplies(c.id, { pageNum: 1, pageSize: 50 })
     repliesMap.value = { ...repliesMap.value, [c.id]: res.records }
+    repliesAllLoaded.value = { ...repliesAllLoaded.value, [c.id]: true }
   } catch {
-    repliesShown.value = { ...repliesShown.value, [c.id]: false }
+    /* request 层已提示 */
   }
-}
-function collapseReplies(c: CommentVO) {
-  repliesShown.value = { ...repliesShown.value, [c.id]: false }
 }
 
 async function toggleCommentLike(c: CommentVO) {
@@ -342,9 +381,13 @@ function previewImage(current: number) {
 
 function formatTime(iso: string): string {
   if (!iso) return ''
-  const d = new Date(iso.replace(/-/g, '/'))
+  // 截取到秒（前19位），去掉微秒精度，再把 T 换成空格、横杠换成斜杠
+  // 这样 "2026-07-20T14:16:00.169913" 在微信小程序 JS 引擎也能正确解析
+  const normalized = iso.slice(0, 19).replace('T', ' ').replace(/-/g, '/')
+  const d = new Date(normalized)
   if (isNaN(d.getTime())) return iso
-  const diff = Date.now() - d.getTime()
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
   const min = Math.floor(diff / 60000)
   if (min < 1) return '刚刚'
   if (min < 60) return `${min}分钟前`
@@ -352,7 +395,12 @@ function formatTime(iso: string): string {
   if (hour < 24) return `${hour}小时前`
   const day = Math.floor(hour / 24)
   if (day < 7) return `${day}天前`
-  return iso.slice(0, 10)
+  const p = (n: number) => String(n).padStart(2, '0')
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  // 同年不显示年份
+  return d.getFullYear() === now.getFullYear()
+    ? md
+    : `${d.getFullYear()}-${md}`
 }
 </script>
 
@@ -539,15 +587,11 @@ $blue: #2563eb;
         display: flex;
         align-items: center;
 
-        .clike-icon {
-          font-size: 28rpx;
-          &.liked { color: #e53e3e; }
-        }
-
         .clike-count {
           font-size: 22rpx;
           color: #999;
-          margin-left: 6rpx;
+          margin-left: 8rpx;
+          &.liked { color: #e53e3e; }
         }
       }
     }
@@ -580,39 +624,94 @@ $blue: #2563eb;
 }
 
 .replies {
-  margin-top: 16rpx;
-  background-color: #f8f9fa;
-  border-radius: 12rpx;
-  padding: 16rpx 20rpx;
+  margin-top: 18rpx;
+  background-color: #f7f8fa;
+  border-radius: 16rpx;
+  padding: 20rpx 22rpx 8rpx;
 
   .reply {
-    margin-bottom: 14rpx;
+    display: flex;
+    margin-bottom: 24rpx;
 
-    .reply-author {
-      font-size: 24rpx;
-      font-weight: 600;
-      color: #555;
+    .reply-avatar {
+      width: 48rpx;
+      height: 48rpx;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background-color: #ececec;
     }
 
-    .reply-to {
-      font-size: 24rpx;
-      color: #999;
+    .reply-main {
+      flex: 1;
+      min-width: 0;
+      margin-left: 16rpx;
+    }
+
+    .reply-head {
+      display: flex;
+      align-items: center;
+
+      .reply-author {
+        font-size: 24rpx;
+        font-weight: 600;
+        color: #555;
+        flex-shrink: 0;
+      }
+
+      .reply-to {
+        font-size: 22rpx;
+        color: #999;
+        margin-left: 12rpx;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .reply-like {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        margin-left: 12rpx;
+
+        .clike-count {
+          font-size: 22rpx;
+          color: #999;
+          margin-left: 8rpx;
+          &.liked { color: #e53e3e; }
+        }
+      }
     }
 
     .reply-text {
-      font-size: 24rpx;
-      color: #333;
+      font-size: 26rpx;
+      color: #1a1a1a;
+      line-height: 1.6;
+      display: block;
+      margin: 8rpx 0;
     }
 
     .reply-foot {
       display: flex;
       align-items: center;
-      margin-top: 6rpx;
+
+      .comment-time {
+        font-size: 20rpx;
+        color: #bbb;
+        margin-right: 24rpx;
+      }
+
+      .comment-action {
+        font-size: 20rpx;
+        color: #2563eb;
+        margin-right: 24rpx;
+      }
     }
   }
 
   .reply-toggle {
-    padding: 6rpx 0;
+    padding: 8rpx 0 14rpx;
 
     .reply-toggle-text {
       font-size: 24rpx;
@@ -669,15 +768,12 @@ $blue: #2563eb;
     flex-direction: column;
     align-items: center;
 
-    .bar-icon {
-      font-size: 34rpx;
-      &.liked { color: #e53e3e; }
-      &.fav { color: #f59e0b; }
-    }
-
     .bar-count {
       font-size: 20rpx;
       color: #999;
+      margin-top: 2rpx;
+      &.liked { color: #e53e3e; }
+      &.fav { color: #f59e0b; }
     }
   }
 

@@ -132,7 +132,12 @@
           </view>
           <view class="post-sm-footer">
             <text class="post-sm-time">{{ formatTime(post.createTime) }}</text>
-            <text class="post-sm-likes">❤️ {{ post.likeCount }} · 💬 {{ post.commentCount }}</text>
+            <view class="post-sm-likes">
+              <app-icon name="heart" :active="true" :size="26" />
+              <text class="post-sm-num">{{ post.likeCount }}</text>
+              <app-icon name="comment" :size="26" />
+              <text class="post-sm-num">{{ post.commentCount }}</text>
+            </view>
           </view>
         </view>
       </view>
@@ -170,7 +175,9 @@
             <text class="liked-title">{{ post.title }}</text>
             <text class="liked-author">{{ post.userNickname }}</text>
           </view>
-          <text class="liked-heart">⭐</text>
+          <view class="liked-heart">
+            <app-icon name="star" :active="true" :size="40" />
+          </view>
         </view>
       </view>
 
@@ -241,6 +248,9 @@
         </view>
 
         <view class="sidebar-footer">
+          <view class="sidebar-logout" @click="showSidebar = false; handleLogout()">
+            <text class="sidebar-logout-text">退出登录</text>
+          </view>
           <text class="sidebar-version">滴答 v1.0.0</text>
         </view>
       </view>
@@ -544,6 +554,20 @@ function openService(name: string) {
 async function logoutAccount() {
   await store.logout()
   uni.reLaunch({ url: '/pages/verify/verify' })
+}
+
+function handleLogout() {
+  uni.showModal({
+    title: '退出登录',
+    content: '确定要退出当前账号吗？',
+    confirmText: '退出',
+    confirmColor: '#e53e3e',
+    success: async (r) => {
+      if (!r.confirm) return
+      await store.logout()
+      uni.reLaunch({ url: '/pages/verify/verify' })
+    },
+  })
 }
 
 function submitFeedback() {
@@ -1156,9 +1180,22 @@ function submitRating() {
     justify-content: space-between;
     margin-top: 16rpx;
 
-    .post-sm-time, .post-sm-likes {
+    .post-sm-time {
       font-size: 20rpx;
       color: #bbb;
+    }
+
+    .post-sm-likes {
+      display: flex;
+      align-items: center;
+
+      .post-sm-num {
+        font-size: 20rpx;
+        color: #bbb;
+        margin: 0 16rpx 0 6rpx;
+
+        &:last-child { margin-right: 0; }
+      }
     }
   }
 }
@@ -1270,9 +1307,9 @@ function submitRating() {
   }
 
   .liked-heart {
-    font-size: 36rpx;
-    color: #ef4444;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
   }
 }
 
@@ -1362,7 +1399,24 @@ function submitRating() {
 .sidebar-footer {
   margin-top: auto;
   text-align: center;
-  padding: 40rpx 0;
+  padding: 24rpx 0 40rpx;
+
+  .sidebar-logout {
+    margin: 0 32rpx 24rpx;
+    height: 80rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2rpx solid #fecaca;
+    border-radius: 40rpx;
+    background-color: #fff5f5;
+  }
+
+  .sidebar-logout-text {
+    font-size: 28rpx;
+    color: #e53e3e;
+    font-weight: 500;
+  }
 
   .sidebar-version {
     font-size: 22rpx;

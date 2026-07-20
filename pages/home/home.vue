@@ -204,7 +204,7 @@ const currentUserName = computed(() => store.userProfile?.nickname ?? '同学')
     <!-- ======================== Search Bar ======================== -->
     <view class="search-section">
       <view class="search-bar">
-        <view class="search-icon">&#128269;</view>
+        <app-icon name="search" :size="32" color="#a3a3a3" class="search-icon" />
         <input
           class="search-input"
           v-model="searchQuery"
@@ -837,9 +837,7 @@ $radius-lg: 24rpx;
 }
 
 .search-icon {
-  font-size: 28rpx;
   margin-right: 12rpx;
-  color: $text-tertiary;
   flex-shrink: 0;
 }
 

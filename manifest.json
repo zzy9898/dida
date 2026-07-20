@@ -42,6 +42,6 @@
                 "desc" : "用于获取位置以推荐附近活动和SOS紧急定位"
             }
         },
-        "requiredPrivateInfos" : [ "getLocation" ]
+        "requiredPrivateInfos" : [ "getLocation", "chooseLocation" ]
     }
 }

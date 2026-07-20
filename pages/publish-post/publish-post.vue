@@ -1,12 +1,14 @@
 <template>
   <view class="page">
-    <!-- Header -->
-    <view class="header">
-      <view class="back-btn" @tap="handleBack">
-        <text class="back-icon">&#x2190;</text>
+    <!-- 自定义导航栏 -->
+    <view class="nav">
+      <view class="nav-bar">
+        <view class="nav-back" @tap="handleBack">
+          <text class="nav-back-icon">&#x2190;</text>
+        </view>
+        <text class="nav-title">发布帖子</text>
+        <view class="nav-placeholder"></view>
       </view>
-      <text class="header-title">发布帖子</text>
-      <view class="header-placeholder"></view>
     </view>
 
     <scroll-view class="form-scroll" scroll-y="true">
@@ -27,29 +29,6 @@
           <view class="photo-add" v-if="images.length < 9" @tap="handlePickImages">
             <text class="photo-add-icon">+</text>
             <text class="photo-add-text">添加</text>
-          </view>
-        </view>
-      </view>
-
-      <!-- Preset Images -->
-      <view class="section">
-        <text class="section-label">快捷配图</text>
-        <view class="preset-img-row">
-          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=400&q=80')">
-            <image class="preset-thumb" src="https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
-            <text class="preset-thumb-label">操场夕阳</text>
-          </view>
-          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=400&q=80')">
-            <image class="preset-thumb" src="https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
-            <text class="preset-thumb-label">图书馆自修</text>
-          </view>
-          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80')">
-            <image class="preset-thumb" src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
-            <text class="preset-thumb-label">猫咪暖阳</text>
-          </view>
-          <view class="preset-img-btn" @tap="addPresetImage('https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80')">
-            <image class="preset-thumb" src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80" mode="aspectFill" />
-            <text class="preset-thumb-label">美味午餐</text>
           </view>
         </view>
       </view>
@@ -100,24 +79,6 @@
         <text class="char-count">{{ form.content.length }}/2000</text>
       </view>
 
-      <!-- Voice Recording -->
-      <view class="section">
-        <text class="section-label">语音转文字</text>
-        <view class="voice-btn-wrap">
-          <view
-            class="voice-btn"
-            :class="{ 'voice-btn--recording': isRecording }"
-            @tap="handleVoiceRecord"
-          >
-            <text class="voice-icon">&#x1F3A4;</text>
-            <text>{{ isRecording ? '正在录制...' : '按住录音转文字' }}</text>
-          </view>
-        </view>
-        <view class="recording-wave" v-if="isRecording">
-          <view class="wave-bar" v-for="i in 5" :key="i" :style="{ animationDelay: (i * 0.15) + 's' }"></view>
-        </view>
-      </view>
-
       <!-- Hashtags -->
       <view class="section">
         <text class="section-label">推荐话题</text>
@@ -136,19 +97,11 @@
       <!-- Location -->
       <view class="section">
         <text class="section-label">位置</text>
-        <picker
-          mode="selector"
-          :range="locationOptions"
-          :value="locationIndex"
-          @change="handleLocationChange"
-        >
-          <view class="picker-field">
-            <text :class="{ 'picker-placeholder': !form.location }">
-              {{ form.location || '不显示位置' }}
-            </text>
-            <text class="picker-arrow">&#x25BC;</text>
-          </view>
-        </picker>
+        <view class="loc-chip" :class="{ 'loc-chip--active': form.location }" @tap="handleChooseLocation">
+          <text class="loc-chip-icon">&#x1F4CD;</text>
+          <text class="loc-chip-text">{{ form.location || '添加所在位置' }}</text>
+          <text v-if="form.location" class="loc-chip-clear" @tap.stop="clearLocation">&#x2715;</text>
+        </view>
       </view>
 
       <!-- Spacer -->
@@ -178,7 +131,6 @@ import type { CreatePostParam } from '@/data/types'
 const store = useAppStore()
 
 const images = ref<string[]>([])
-const isRecording = ref(false)
 const publishing = ref(false)
 
 interface PublishPostForm {
@@ -186,13 +138,17 @@ interface PublishPostForm {
   categoryId: number | null
   content: string
   location: string
+  longitude: number | null
+  latitude: number | null
 }
 
 const form = reactive<PublishPostForm>({
   title: '',
   categoryId: null,
   content: '',
-  location: ''
+  location: '',
+  longitude: null,
+  latitude: null
 })
 
 // 动态分类（后端 §4.1）
@@ -210,14 +166,14 @@ onShow(async () => {
 
 const hashtags = ['#跑步打卡', '#操场晚风', '#期末加油', '#自习室', '#猫咖日记', '#食堂干饭', '#校园街拍', '#今日穿搭']
 
-const locationOptions = ['不显示位置', '中心校区图书馆', '风雨操场', '齐园餐厅', '洪家楼教堂', '蒋震图书馆']
-const locationIndex = computed(() => {
-  const idx = locationOptions.indexOf(form.location)
-  return idx >= 0 ? idx : 0
-})
-
 function handleBack() {
-  uni.switchTab({ url: '/pages/forum/forum' })
+  // 能返回上一页就返回，否则（栈底 / 从 tab 进入）回到论坛
+  const pages = getCurrentPages()
+  if (pages.length > 1) {
+    uni.navigateBack()
+  } else {
+    uni.switchTab({ url: '/pages/forum/forum' })
+  }
 }
 
 function handlePickImages() {
@@ -239,42 +195,41 @@ function removeImage(idx: number) {
   images.value = images.value.filter((_, i) => i !== idx)
 }
 
-function addPresetImage(url: string) {
-  if (images.value.length >= 9) {
-    uni.showToast({ title: '最多添加9张图片', icon: 'none' })
-    return
-  }
-  if (images.value.includes(url)) {
-    uni.showToast({ title: '该图片已添加', icon: 'none' })
-    return
-  }
-  images.value = [...images.value, url]
+function handleChooseLocation() {
+  // 调用微信原生地图选点（底层为腾讯位置服务）
+  uni.chooseLocation({
+    success: (res) => {
+      // name 为 POI 名称，address 为详细地址；name 可能为空时退回 address
+      form.location = res.name || res.address || ''
+      form.longitude = res.longitude
+      form.latitude = res.latitude
+    },
+    fail: (err) => {
+      // 用户取消不提示；仅在权限被拒时引导
+      const msg = err?.errMsg || ''
+      if (msg.includes('auth deny') || msg.includes('authorize')) {
+        uni.showModal({
+          title: '需要位置权限',
+          content: '请在设置中开启位置权限后再选择地点',
+          confirmText: '去设置',
+          success: (r) => {
+            if (r.confirm) uni.openSetting()
+          },
+        })
+      }
+    },
+  })
 }
 
-function handleLocationChange(e: any) {
-  const idx = Number(e.detail.value)
-  if (idx === 0) {
-    form.location = ''
-  } else {
-    form.location = locationOptions[idx]
-  }
+function clearLocation() {
+  form.location = ''
+  form.longitude = null
+  form.latitude = null
 }
 
 function appendHashtag(tag: string) {
   if (form.content.includes(tag)) return
   form.content = form.content ? form.content + ' ' + tag : tag
-}
-
-function handleVoiceRecord() {
-  if (isRecording.value) return
-  isRecording.value = true
-
-  setTimeout(() => {
-    isRecording.value = false
-    const voiceText = '【语音转文字】今天天气真好，适合出去走走，有没有一起的小伙伴呀？'
-    form.content = form.content ? form.content + '\n' + voiceText : voiceText
-    uni.showToast({ title: '语音识别完成', icon: 'success' })
-  }, 2500)
 }
 
 function validateForm(): string | null {
@@ -305,6 +260,8 @@ async function handlePublish() {
       content: form.content.trim(),
       media,
       locationName: form.location || undefined,
+      longitude: form.location && form.longitude != null ? form.longitude : undefined,
+      latitude: form.location && form.latitude != null ? form.latitude : undefined,
     }
 
     await store.publishPost(param)
@@ -334,7 +291,6 @@ $border: #e5e7eb;
 $text: #333333;
 $text-secondary: #666666;
 $text-placeholder: #c0c4cc;
-$red: #ef4444;
 
 .page {
   height: 100vh;
@@ -346,39 +302,49 @@ $red: #ef4444;
   flex-direction: column;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20rpx 32rpx;
+/* 自定义导航栏 */
+.nav {
+  flex-shrink: 0;
   background-color: #ffffff;
   border-bottom: 1rpx solid $border;
-  flex-shrink: 0;
+  // 留出状态栏高度（刘海/时间信号区），uni-app 内置变量
+  padding-top: var(--status-bar-height, 20px);
   z-index: 10;
 }
 
-.back-btn {
-  width: 64rpx;
-  height: 64rpx;
+.nav-bar {
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  padding: 0 16rpx;
+}
+
+.nav-back {
+  width: 72rpx;
+  height: 72rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
-.back-icon {
-  font-size: 40rpx;
+.nav-back-icon {
+  font-size: 44rpx;
   color: $text;
   font-weight: 700;
 }
 
-.header-title {
+.nav-title {
+  flex: 1;
+  text-align: center;
   font-size: 34rpx;
   font-weight: 700;
   color: $text;
 }
 
-.header-placeholder {
-  width: 64rpx;
+.nav-placeholder {
+  width: 72rpx;
+  flex-shrink: 0;
 }
 
 .form-scroll {
@@ -478,34 +444,6 @@ $red: #ef4444;
   transform: translate(-50%, 10rpx);
 }
 
-/* Preset Images */
-.preset-img-row {
-  display: flex;
-  gap: 16rpx;
-  overflow: hidden;
-}
-
-.preset-img-btn {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.preset-thumb {
-  width: 100%;
-  height: 140rpx;
-  border-radius: 12rpx;
-}
-
-.preset-thumb-label {
-  font-size: 20rpx;
-  color: $text-secondary;
-  text-align: center;
-}
-
 /* Input */
 .input-field {
   width: 100%;
@@ -563,67 +501,6 @@ $red: #ef4444;
   box-sizing: border-box;
 }
 
-/* Voice */
-.voice-btn-wrap {
-  display: flex;
-  justify-content: center;
-}
-
-.voice-btn {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  padding: 20rpx 48rpx;
-  background-color: #ffffff;
-  border: 2rpx solid $border;
-  border-radius: 48rpx;
-  font-size: 28rpx;
-  color: $text-secondary;
-
-  &--recording {
-    background-color: #fef2f2;
-    border-color: $red;
-    color: $red;
-    animation: pulse 0.8s ease-in-out infinite;
-  }
-}
-
-.voice-icon {
-  font-size: 36rpx;
-}
-
-.recording-wave {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 8rpx;
-  height: 60rpx;
-  margin-top: 16rpx;
-}
-
-.wave-bar {
-  width: 8rpx;
-  height: 20rpx;
-  background-color: $red;
-  border-radius: 4rpx;
-  animation: waveAnim 0.6s ease-in-out infinite alternate;
-
-  &:nth-child(2) { height: 36rpx; }
-  &:nth-child(3) { height: 52rpx; }
-  &:nth-child(4) { height: 36rpx; }
-  &:nth-child(5) { height: 20rpx; }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(1.03); }
-}
-
-@keyframes waveAnim {
-  0% { height: 20%; }
-  100% { height: 100%; }
-}
-
 /* Hashtags */
 .hashtag-row {
   display: flex;
@@ -639,29 +516,57 @@ $red: #ef4444;
   color: $blue;
 }
 
-/* Picker */
-.picker-field {
-  width: 100%;
-  height: 80rpx;
-  background-color: #ffffff;
-  border: 2rpx solid $border;
-  border-radius: 12rpx;
-  padding: 0 24rpx;
-  font-size: 28rpx;
-  color: $text;
-  box-sizing: border-box;
-  display: flex;
+/* Location chip */
+.loc-chip {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  max-width: 100%;
+  height: 64rpx;
+  padding: 0 24rpx;
+  background-color: #f2f3f5;
+  border-radius: 32rpx;
+  box-sizing: border-box;
+
+  &--active {
+    background-color: #eff6ff;
+
+    .loc-chip-text {
+      color: $blue;
+      font-weight: 500;
+    }
+
+    .loc-chip-icon {
+      opacity: 1;
+    }
+  }
 }
 
-.picker-placeholder {
-  color: $text-placeholder;
+.loc-chip-icon {
+  font-size: 28rpx;
+  margin-right: 8rpx;
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
-.picker-arrow {
-  font-size: 24rpx;
-  color: $text-placeholder;
+.loc-chip-text {
+  font-size: 26rpx;
+  color: $text-secondary;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.loc-chip-clear {
+  font-size: 22rpx;
+  color: $blue;
+  flex-shrink: 0;
+  margin-left: 12rpx;
+  width: 36rpx;
+  height: 36rpx;
+  line-height: 36rpx;
+  text-align: center;
+  border-radius: 50%;
+  background-color: rgba(37, 99, 235, 0.12);
 }
 
 /* Spacer */
@@ -685,8 +590,6 @@ $red: #ef4444;
 
 @media screen and (max-width: 360px) {
   .form-scroll { padding-left: 24rpx; padding-right: 24rpx; }
-  .preset-img-row { gap: 10rpx; }
-  .preset-thumb { height: 112rpx; }
   .category-grid, .hashtag-row { gap: 12rpx; }
   .category-btn { padding-left: 22rpx; padding-right: 22rpx; }
   .bottom-bar { padding-left: 24rpx; padding-right: 24rpx; gap: 16rpx; }

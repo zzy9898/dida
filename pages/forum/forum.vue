@@ -2,7 +2,20 @@
   <view class="forum-page">
     <!-- Header -->
     <view class="forum-header">
-      <text class="forum-title">滴答校园生活论坛</text>
+      <view class="forum-header-bar">
+        <view class="search-bar">
+          <app-icon name="search" :size="30" color="#a3a3a3" class="search-icon" />
+          <input
+            class="search-input"
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索帖子标题、内容、用户"
+            placeholder-style="color:#a3a3a3;font-size:26rpx;"
+            confirm-type="search"
+          />
+          <text v-if="searchQuery" class="search-clear" @tap="clearSearch">&#10005;</text>
+        </view>
+      </view>
     </view>
 
     <!-- Category Tabs -->
@@ -29,14 +42,13 @@
       @refresherrefresh="onRefresh"
     >
       <view class="post-list-content">
-        <view v-if="!loading && posts.length === 0" class="empty-state">
-          <text class="empty-icon">📝</text>
-          <text class="empty-text">暂无相关帖子</text>
-          <text class="empty-sub">换个分类看看，或者去发布你的第一条帖子吧</text>
+        <view v-if="!loading && displayPosts.length === 0" class="empty-state">
+          <text class="empty-text">{{ searchQuery.trim() ? '没有匹配的帖子' : '暂无相关帖子' }}</text>
+          <text class="empty-sub">{{ searchQuery.trim() ? '换个关键词试试' : '换个分类看看，或者去发布你的第一条帖子吧' }}</text>
         </view>
 
         <view
-          v-for="post in posts"
+          v-for="post in displayPosts"
           :key="post.id"
           class="post-card"
           @click="goDetail(post)"
@@ -78,24 +90,25 @@
           <!-- Actions -->
           <view class="post-actions">
             <view class="action-item" @click.stop="toggleLike(post)">
-              <text :class="post.liked ? 'action-icon liked' : 'action-icon'">
-                {{ post.liked ? '❤️' : '🤍' }}
-              </text>
+              <app-icon name="heart" :active="post.liked" :size="40" />
               <text :class="post.liked ? 'action-text liked-text' : 'action-text'">{{ post.likeCount }}</text>
             </view>
-            <view class="action-item" @click.stop="goDetail(post)">
-              <text class="action-icon">💬</text>
+            <view class="action-item" @click.stop="goComments(post)">
+              <app-icon name="comment" :size="40" />
               <text class="action-text">{{ post.commentCount }}</text>
             </view>
             <view class="action-item">
-              <text class="action-icon">⭐</text>
-              <text class="action-text">{{ post.favoriteCount }}</text>
+              <app-icon name="star" :active="post.favorited" :size="40" />
+              <text :class="post.favorited ? 'action-text fav-text' : 'action-text'">{{ post.favoriteCount }}</text>
             </view>
           </view>
         </view>
 
-        <view v-if="posts.length > 0" class="list-bottom">
+        <view v-if="!searchQuery.trim() && posts.length > 0" class="list-bottom">
           <text class="bottom-text">{{ noMore ? '-- 已经到底啦 --' : '加载中...' }}</text>
+        </view>
+        <view v-if="searchQuery.trim() && displayPosts.length > 0" class="list-bottom">
+          <text class="bottom-text">-- 仅搜索已加载的帖子 --</text>
         </view>
       </view>
     </scroll-view>
@@ -129,6 +142,22 @@ const total = ref(0)
 const loading = ref(false)
 const refreshing = ref(false)
 const noMore = computed(() => posts.value.length >= total.value)
+
+// 搜索（后端 /post/list 无关键词参数，此处对已加载列表做本地过滤）
+const searchQuery = ref('')
+const displayPosts = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return posts.value
+  return posts.value.filter(
+    (p) =>
+      p.title.toLowerCase().includes(q) ||
+      p.content.toLowerCase().includes(q) ||
+      p.userNickname.toLowerCase().includes(q)
+  )
+})
+function clearSearch() {
+  searchQuery.value = ''
+}
 
 async function loadCategories() {
   try {
@@ -181,6 +210,10 @@ function goDetail(post: PostListItemVO) {
   uni.navigateTo({ url: `/pages/post-detail/post-detail?postId=${post.id}` })
 }
 
+function goComments(post: PostListItemVO) {
+  uni.navigateTo({ url: `/pages/post-detail/post-detail?postId=${post.id}&focus=comments` })
+}
+
 async function toggleLike(post: PostListItemVO) {
   const wasLiked = post.liked
   // 乐观更新
@@ -202,9 +235,12 @@ function previewImage(media: MediaItem[], current: number) {
 /** 后端返回 ISO 时间 → 友好展示 */
 function formatTime(iso: string): string {
   if (!iso) return ''
-  const d = new Date(iso.replace(/-/g, '/'))
+  // 截取到秒（前19位），去掉微秒精度，再把 T 换成空格、横杠换成斜杠
+  const normalized = iso.slice(0, 19).replace('T', ' ').replace(/-/g, '/')
+  const d = new Date(normalized)
   if (isNaN(d.getTime())) return iso
-  const diff = Date.now() - d.getTime()
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
   const min = Math.floor(diff / 60000)
   if (min < 1) return '刚刚'
   if (min < 60) return `${min}分钟前`
@@ -212,7 +248,11 @@ function formatTime(iso: string): string {
   if (hour < 24) return `${hour}小时前`
   const day = Math.floor(hour / 24)
   if (day < 7) return `${day}天前`
-  return iso.slice(0, 10)
+  const p = (n: number) => String(n).padStart(2, '0')
+  const md = `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return d.getFullYear() === now.getFullYear()
+    ? md
+    : `${d.getFullYear()}-${md}`
 }
 
 // 每次进入（含发帖后 switchTab 返回）刷新列表
@@ -235,14 +275,51 @@ onShow(() => {
 
 .forum-header {
   background-color: #fff;
-  padding: 24rpx 32rpx;
-  border-bottom: 1px solid #eee;
+  padding-top: var(--status-bar-height, 20px);
+  flex-shrink: 0;
   box-sizing: border-box;
 
-  .forum-title {
-    font-size: 36rpx;
-    font-weight: 700;
+  .forum-header-bar {
+    min-height: 88rpx;
+    display: flex;
+    align-items: center;
+    padding: 10rpx 32rpx;
+  }
+
+  .search-bar {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    height: 68rpx;
+    background-color: #f2f3f5;
+    border-radius: 34rpx;
+    padding: 0 24rpx;
+    box-sizing: border-box;
+  }
+
+  .search-icon {
+    margin-right: 12rpx;
+    flex-shrink: 0;
+  }
+
+  .search-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    font-size: 26rpx;
     color: #1a1a1a;
+  }
+
+  .search-clear {
+    font-size: 24rpx;
+    color: #a3a3a3;
+    flex-shrink: 0;
+    margin-left: 12rpx;
+    width: 40rpx;
+    height: 40rpx;
+    line-height: 40rpx;
+    text-align: center;
   }
 }
 
@@ -299,11 +376,6 @@ onShow(() => {
   align-items: center;
   justify-content: center;
   padding: 120rpx 0;
-
-  .empty-icon {
-    font-size: 80rpx;
-    margin-bottom: 24rpx;
-  }
 
   .empty-text {
     font-size: 30rpx;
@@ -381,8 +453,7 @@ onShow(() => {
 }
 
 @media screen and (max-width: 360px) {
-  .forum-header { padding: 20rpx 24rpx; }
-  .forum-header .forum-title { font-size: 32rpx; }
+  .forum-header .forum-header-bar { padding-left: 24rpx; padding-right: 24rpx; }
   .category-tabs .tab-list { padding: 14rpx 20rpx; }
   .category-tabs .tab-list .tab-item { padding: 10rpx 22rpx; margin-right: 12rpx; }
   .post-list-content { padding-left: 18rpx; padding-right: 18rpx; }
@@ -456,29 +527,20 @@ onShow(() => {
     margin-right: 48rpx;
     padding: 4rpx 8rpx;
 
-    .action-icon {
-      font-size: 36rpx;
-      &.liked {
-        animation: heartBeat 0.3s ease;
-      }
-    }
-
     .action-text {
       font-size: 26rpx;
       color: #999;
-      margin-left: 8rpx;
+      margin-left: 10rpx;
 
       &.liked-text {
         color: #e53e3e;
       }
+
+      &.fav-text {
+        color: #f59e0b;
+      }
     }
   }
-}
-
-@keyframes heartBeat {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.3); }
-  100% { transform: scale(1); }
 }
 
 .list-bottom {
